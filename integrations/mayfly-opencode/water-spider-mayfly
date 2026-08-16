@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CONFIG="$ROOT/integrations/mayfly-opencode/opencode.json"
+BASE_URL="${WATER_SPIDER_LLM_BASE_URL:-http://127.0.0.1:8080/v1}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  water-spider-mayfly check
+  water-spider-mayfly hatch <task.json> [mayfly hatch options...]
+  water-spider-mayfly qualify
+
+Environment:
+  WATER_SPIDER_LLM_BASE_URL  OpenAI-compatible base URL (default: http://127.0.0.1:8080/v1)
+  MAYFLY_BIN                 mayfly executable (default: mayfly)
+  OPENCODE_BIN               opencode executable (default: opencode)
+EOF
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf 'water-spider-mayfly: required command not found: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+check_endpoint() {
+  need curl
+  need jq
+  curl --fail --silent --show-error "${BASE_URL%/}/models" |
+    jq -e '.data | type == "array"' >/dev/null
+  printf 'ready: %s (OpenAI-compatible model catalog reached)\n' "$BASE_URL"
+}
+
+prepare() {
+  local mayfly_bin="${MAYFLY_BIN:-mayfly}"
+  local opencode_bin="${OPENCODE_BIN:-opencode}"
+  need "$mayfly_bin"
+  need "$opencode_bin"
+  export OPENCODE_CONFIG="$CONFIG"
+  export WATER_SPIDER_LLM_BASE_URL="$BASE_URL"
+  export MAYFLY_OPENCODE_MODEL="water-spider/speedy"
+}
+
+qualify() {
+  prepare
+  check_endpoint
+  local fixture
+  fixture="$(mktemp -d "${TMPDIR:-/tmp}/water-spider-agent.XXXXXX")"
+  trap 'rm -rf "$fixture"' EXIT
+  mkdir -p "$fixture/tests"
+  printf '%s\n' 'answer=wrong' > "$fixture/answer.txt"
+  printf '%s\n' '#!/usr/bin/env bash' 'grep -Fxq "answer=42" answer.txt' > "$fixture/tests/check.sh"
+  chmod +x "$fixture/tests/check.sh"
+  printf '%s\n' \
+    '{' \
+    '  "task": "Fix answer.txt so tests/check.sh passes. Change only answer.txt.",' \
+    '  "done_when": {"type": "command", "run": "./tests/check.sh", "expect_exit": 0},' \
+    '  "harness": "opencode",' \
+    "  \"cwd\": \"$fixture\"," \
+    '  "ttl": "10m",' \
+    '  "constraints": {"paths_allow": ["answer.txt"], "no_spawn": true}' \
+    '}' > "$fixture/task.json"
+  git -C "$fixture" init --quiet
+  git -C "$fixture" add answer.txt tests/check.sh
+  git -C "$fixture" -c user.name=water-spider -c user.email=local@example.invalid commit --quiet -m fixture
+  "${MAYFLY_BIN:-mayfly}" validate "$fixture/task.json"
+  "${MAYFLY_BIN:-mayfly}" hatch "$fixture/task.json"
+  "$fixture/tests/check.sh"
+  local changed
+  changed="$(git -C "$fixture" diff --name-only)"
+  [ "$changed" = "answer.txt" ] || {
+    printf 'qualification failed: unexpected changed paths: %s\n' "$changed" >&2
+    exit 1
+  }
+  printf 'qualified: Mayfly + OpenCode edited only answer.txt and satisfied tests/check.sh\n'
+}
+
+case "${1:-}" in
+  check)
+    prepare
+    check_endpoint
+    ;;
+  hatch)
+    shift
+    [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+    prepare
+    check_endpoint
+    "${MAYFLY_BIN:-mayfly}" hatch "$@"
+    ;;
+  qualify)
+    qualify
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

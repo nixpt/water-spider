@@ -10,7 +10,7 @@ but works with any RunPod pod template.
 **Runtime:** pure Bash with `runpodctl`/`ssh`/`jq`/`pgrep`; `curl` is
 conditional for GraphQL-only creation flags and `bucket-bridge` can optionally
 provision supported missing tools.
-**Verification:** 29 deterministic command cases, Bash syntax checks, and
+**Verification:** 33 deterministic command cases, Bash syntax checks, and
 ShellCheck 0.10.0. See `docs/testing.md`.
 
 **Origin:** extracted from `jokersquad/bin/water-spider` via
@@ -32,8 +32,11 @@ from the finished script, not a `git subtree split`.
   pulling GGUF models. Base `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404`
   (same as `nixpt/zorro`'s own image — proven SSH self-heal). `zorro`
   itself is NOT in this image (stays private) — llama.cpp is a fully
-  separate, general-purpose engine. 32.2GB, `CUDA_ARCHS="89;90;120"`
-  (Ada/Hopper/Blackwell). Real bug found+fixed during the build: llama.cpp's
+  separate, general-purpose engine. The next image uses
+  `CUDA_ARCHS="86;89;90;120"` (Ampere/Ada/Hopper/Blackwell). The published
+  v0.4.1 image still has `89;90;120`; WATERS-020 live validation proved that
+  omission makes RTX A4000/3090 fail with `no kernel image is available`.
+  Real bug found+fixed during the original build: llama.cpp's
   CMake links `CUDA::cuda_driver` (an absolute-path `find_library` lookup,
   not a bare `-l` flag) for its VMM allocator path — no real `libcuda.so.1`
   exists at Docker BUILD time (only once a GPU is attached at `docker run`),
@@ -94,6 +97,23 @@ pulls, GPU initialization/inference, tunneling, HTTP completion, teardown, and
 independent absence verification. `send`/`receive`, the `recipe serve` wrapper,
 GUI forwarding, and snapshot collection remain explicitly unproven on a live
 pod (WATERS-003).
+
+**Ephemeral agent path:** WATERS-020 adds a local Mayfly lifecycle and OpenCode
+harness over the v2 pod's tunneled llama.cpp API. The `llama-agent` recipe is
+loopback-only and enables the Jinja tool-call path. Configuration, preflight,
+and command construction are deterministic-test-covered; the opt-in model
+qualification fixture has not yet been run against a live model.
+
+**WATERS-020 live validation (Community RTX A4000, pod `d2rizci8dwgvne`):**
+the v2 image, SSH endpoint, Hugging Face download, localhost tunnel,
+OpenAI-compatible `/health`, `/v1/models`, `/props`, and Qwen tool-aware chat
+template were observed live. GPU inference failed because compute architecture
+8.6 was absent from the published image. CPU fallback reached OpenCode and
+submitted its tool schema, but did not finish the edit within the practical
+window because the prompt was approximately 13k tokens. The pod was deleted
+and independently confirmed absent at 13:18 CDT; the pre-existing foreman pod
+`f2xau4gu5fhwtj` remained the only active pod. This is failure evidence, not a
+successful GPU or end-to-end agent qualification claim.
 
 **Release state:** the canonical GitHub remote is configured; `VERSION` and
 `v0.1.0` establish the project release line. The release workflow no-ops on an

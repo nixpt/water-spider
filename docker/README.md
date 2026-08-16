@@ -56,10 +56,10 @@ docker build -t nixpt/water-spider .
 # CPU control pod
 docker build -f Dockerfile.runpod -t nixpt/water-spider:pod .
 
-# GPU control pod (CUDA_ARCHS default covers Ada/Hopper/Blackwell —
+# GPU control pod (CUDA_ARCHS default covers Ampere/Ada/Hopper/Blackwell —
 # narrow it to your actual target for a much faster build)
 docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
-  --build-arg CUDA_ARCHS="89;90;120" .
+  --build-arg CUDA_ARCHS="86;89;90;120" .
 ```
 
 ## Why `:v2` exists separately from `:pod`

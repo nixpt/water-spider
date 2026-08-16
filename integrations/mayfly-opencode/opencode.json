@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "water-spider/speedy",
+  "provider": {
+    "water-spider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Water Spider llama.cpp",
+      "options": {
+        "baseURL": "{env:WATER_SPIDER_LLM_BASE_URL}",
+        "apiKey": "local-tunnel"
+      },
+      "models": {
+        "speedy": {
+          "name": "Speedy (tunneled llama.cpp)",
+          "tool_call": true
+        }
+      }
+    }
+  }
+}
