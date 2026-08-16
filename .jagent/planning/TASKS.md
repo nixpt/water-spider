@@ -10,7 +10,7 @@ full details on each `WATERS-N` ID.
 - [x] [WATERS-001](tickets/WATERS-001-shellcheck-clean.md) — Make `shellcheck bin/water-spider` clean
 - [x] [WATERS-002](tickets/WATERS-002-command-test-harness.md) — Add a mocked command-level test harness
 - [ ] [WATERS-003](tickets/WATERS-003-live-runpod-validation.md) — Validate unproven workflows against one controlled live pod
-- [ ] [WATERS-004](tickets/WATERS-004-graphql-path-hardening.md) — Harden GraphQL dependencies and input construction
+- [x] [WATERS-004](tickets/WATERS-004-graphql-path-hardening.md) — Harden GraphQL dependencies and input construction
 
 ## P1 — Release Readiness
 

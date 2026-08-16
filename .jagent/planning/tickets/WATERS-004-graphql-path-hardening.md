@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-004 |
 | **Priority** | P0 |
-| **Status** | Backlog |
+| **Status** | Done |
 | **Phase** | Core health |
 | **Assignee** | unassigned |
 | **Dependencies** | WATERS-002 |
@@ -22,10 +22,10 @@ The GraphQL create path calls `curl` without declaring it as a required dependen
 
 ## Success criteria
 
-- [ ] Entering the GraphQL path fails early with a clear dependency error when `curl` is unavailable.
-- [ ] String values are encoded safely through GraphQL variables or equivalent JSON-safe construction.
-- [ ] Numeric and enum options are validated before any network request.
-- [ ] Mocked tests cover quotes, backslashes, invalid numbers, malformed CUDA lists, GraphQL errors, and transport failure.
+- [x] Entering the GraphQL path fails early with a clear dependency error when `curl` is unavailable.
+- [x] String values are encoded safely through GraphQL variables or equivalent JSON-safe construction.
+- [x] Numeric and enum options are validated before any network request.
+- [x] Mocked tests cover quotes, backslashes, invalid numbers, malformed CUDA lists, GraphQL errors, and transport failure.
 
 ## Technical approach
 
@@ -42,3 +42,7 @@ The GraphQL create path calls `curl` without declaring it as a required dependen
 ## Non-goals
 
 - Replacing `runpodctl` for subcommands it already supports.
+
+## Resolution
+
+The GraphQL path now checks for `curl` only when selected, JSON-encodes every interpolated string as a GraphQL-compatible literal, and validates numeric fields, cloud enums, CUDA-version lists, and country codes before the request. The fake curl adapter validates escaped mutation content and simulates transport and GraphQL errors. All 29 command tests, ShellCheck 0.10.0, Bash syntax validation, and whitespace checks pass.

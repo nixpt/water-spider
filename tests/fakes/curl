@@ -1,2 +1,23 @@
 #!/usr/bin/env bash
-printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n'
+set -euo pipefail
+
+payload=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-d" ]; then
+    payload="$2"
+    [ -n "${FAKE_CURL_CAPTURE:-}" ] && printf '%s\n' "$2" > "$FAKE_CURL_CAPTURE"
+    shift 2
+  else
+    shift
+  fi
+done
+
+if [ "${FAKE_CURL_VALIDATE:-0}" = "1" ]; then
+  printf '%s' "$payload" | jq -e '.query | contains("quoted\\\"name") and contains("quoted\\\"image")' >/dev/null
+fi
+
+case "${FAKE_CURL_MODE:-ok}" in
+  transport-fail) exit 7 ;;
+  graphql-error) printf '{"errors":[{"message":"no capacity"}]}\n' ;;
+  *) printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n' ;;
+esac
