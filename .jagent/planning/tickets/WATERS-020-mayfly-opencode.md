@@ -22,10 +22,19 @@ documented path from Mayfly through OpenCode to its tunneled inference API.
 - [x] Add a constrained, opt-in live qualification fixture.
 - [x] Document ownership boundaries, prerequisites, safety limits, and teardown.
 - [x] Cover the endpoint preflight and recipe dispatch deterministically.
+- [x] Correct argument and failure-propagation defects found during live use.
 
 ## Resolution
 
 Added `llama-agent`, a local integration wrapper and provider configuration,
 an isolated qualification fixture, deterministic checks, and an operator guide.
-Mayfly and OpenCode remain replaceable host dependencies; no harness was forked
-and no live or billable resource was used during implementation.
+Mayfly and OpenCode remain replaceable host dependencies; no harness was forked.
+
+Live validation on Community Cloud pod `d2rizci8dwgvne` (RTX A4000) found that
+the pinned llama.cpp build requires a value for `--flash-attn`; the recipe also
+failed to propagate a rejected server launch. The final command uses
+`--flash-attn auto`, and its failure branch now exits nonzero. Subsequent
+qualification evidence is recorded in `STATE.md`. The same run proved the
+published v2 image omitted CUDA architecture 8.6, so RTX A4000/3090 inference
+fails. The Docker default now includes 8.6, but GPU and end-to-end agent
+qualification remain unproven until the corrected image is published and run.

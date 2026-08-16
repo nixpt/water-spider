@@ -13,7 +13,7 @@ cargo clippy --manifest-path mcp/Cargo.toml --all-targets --locked -- -D warning
 git diff --check
 ```
 
-The suite currently runs 32 cases. It covers every CLI dispatch path plus API
+The suite currently runs 33 cases. It covers every CLI dispatch path plus API
 failure, malformed JSON, ambiguous SSH data, GraphQL escaping and validation,
 transport errors, idempotent replay, failed teardown verification, and the
 Mayfly/OpenCode endpoint preflight. Live model qualification remains opt-in.

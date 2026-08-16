@@ -639,7 +639,7 @@ EOF
       case "$engine" in
         zorro) remote_cmd="nohup zorro serve '$model' --port $port > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
         llama) remote_cmd="nohup llama-server -m '$model' --port $port -ngl 99 > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
-        llama-agent) remote_cmd="nohup llama-server -m '$model' --host 127.0.0.1 --port $port -ngl 999 --jinja -fa --alias speedy > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
+        llama-agent) remote_cmd="nohup llama-server -m '$model' --host 127.0.0.1 --port $port -ngl 999 --jinja --flash-attn auto --alias speedy > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || { echo FAILED; tail -20 ~/serve.log; exit 1; }" ;;
         pf)    remote_cmd="nohup pf serve > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
         *) die "recipe serve: unknown --engine '$engine' (zorro|llama|llama-agent|pf)" ;;
       esac

@@ -139,6 +139,11 @@ Confirm actual GPU use instead of assuming offload succeeded:
 nvidia-smi
 ```
 
+Release v0.4.1 omitted CUDA architecture 8.6, so its published image cannot run
+llama.cpp on Ampere RTX A4000/3090 GPUs. The corrected image build includes
+`86;89;90;120`; do not claim the Ampere path is fixed until a release containing
+that build is published and live-tested.
+
 The other installed llama.cpp tools support direct inference, benchmarking,
 quantization, and GGUF splitting:
 

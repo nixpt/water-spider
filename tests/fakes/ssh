@@ -3,7 +3,10 @@ set -euo pipefail
 
 if [ "${FAKE_SSH_REQUIRE_AGENT:-0}" = "1" ] && [[ "$*" == *"llama-server"* ]]; then
   [[ "$*" == *"--host 127.0.0.1"* ]]
-  [[ "$*" == *"--jinja -fa --alias speedy"* ]]
+  [[ "$*" == *"--jinja --flash-attn auto --alias speedy"* ]]
+fi
+if [ "${FAKE_SSH_AGENT_FAIL:-0}" = "1" ] && [[ "$*" == *"llama-server"* ]]; then
+  exit 1
 fi
 
 case " $* " in

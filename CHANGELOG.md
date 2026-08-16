@@ -8,6 +8,7 @@ appends entries mechanically on pushes to `main`.
 ## [Unreleased]
 
 - feat: connect Mayfly and OpenCode to tunneled v2 llama.cpp inference
+- fix: compile v2 for Ampere GPUs and propagate failed agent-server launches
 
 ## [0.4.1] - 2026-08-16
 
