@@ -55,6 +55,13 @@ run_case "teardown verifies deletion" 0 "confirmed gone" run_with_input_mode y e
 run_case "gpu listing" 0 "NVIDIA RTX 4090" "$CLI" gpus --available
 run_case "scaffold passthrough" 0 "FAKE_SCAFFOLD demo" "$CLI" scaffold demo
 run_case "create" 0 "created pod pod-new" "$CLI" create --image example/image:latest --gpu "NVIDIA RTX 4090"
+run_case "GraphQL create safely escapes strings" 0 "created pod pod-new" env RUNPOD_API_KEY=test FAKE_CURL_VALIDATE=1 "$CLI" create --image 'example/quoted"image' --name 'quoted"name' --gpu "NVIDIA RTX 4090" --min-download 100.5 --cuda-versions 12.4,12.5 --country US
+run_case "GraphQL transport failure" 1 "GraphQL request failed" env RUNPOD_API_KEY=test FAKE_CURL_MODE=transport-fail "$CLI" create --image image --gpu gpu --min-download 100
+run_case "GraphQL API error" 1 "GraphQL create failed: no capacity" env RUNPOD_API_KEY=test FAKE_CURL_MODE=graphql-error "$CLI" create --image image --gpu gpu --min-download 100
+run_case "invalid numeric option" 1 "--min-download must be" env RUNPOD_API_KEY=test "$CLI" create --image image --gpu gpu --min-download nope
+run_case "invalid CUDA list" 1 "invalid version" env RUNPOD_API_KEY=test "$CLI" create --image image --gpu gpu --cuda-versions 12.4,bad
+run_case "invalid cloud enum" 1 "--cloud must be" "$CLI" create --image image --gpu gpu --cloud CHEAP
+run_case "invalid country" 1 "--country must be" env RUNPOD_API_KEY=test "$CLI" create --image image --gpu gpu --country usa
 
 run_case "malformed JSON fails visibly" 5 "jq: parse error" env FAKE_RUNPOD_MODE=malformed "$CLI" create --image example/image:latest --gpu gpu
 run_case "API failure is surfaced" 1 "runpodctl pod get pod-1 failed" env FAKE_RUNPOD_MODE=api-fail "$CLI" get pod-1

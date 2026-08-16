@@ -194,6 +194,20 @@ ws_api_key() {
   grep -oP "(?<=apikey = ')[^']+" "$cfg" 2>/dev/null || grep -oP '(?<=apikey = ")[^"]+' "$cfg"
 }
 
+ws_gql_string() {
+  jq -Rnr --arg value "$1" '$value | @json'
+}
+
+ws_require_uint() {
+  local flag="$1" value="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] || die "create: $flag must be a non-negative integer (got '$value')"
+}
+
+ws_require_number() {
+  local flag="$1" value="$2"
+  [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "create: $flag must be a non-negative number (got '$value')"
+}
+
 # GPU-pod create via GraphQL — only reached when a GraphQL-only flag is
 # given (min_download/min_upload/cuda_versions/data_center/country); the
 # default `create` path stays on runpodctl, already tested and unchanged.
@@ -203,20 +217,25 @@ ws_create_via_graphql() {
   shift 9
   local min_dl="$1" min_ul="$2" cuda_versions="$3" dc="$4" country="$5"
 
-  local fields=("name: \"$name\"" "cloudType: $cloud" "startSsh: true"
-    "gpuTypeId: \"$gpu\"" "supportPublicIp: true" "gpuCount: $gpu_count"
-    "volumeInGb: $volume" "containerDiskInGb: $disk" "ports: \"$ports\""
+  need curl
+  local fields=("name: $(ws_gql_string "$name")" "cloudType: $cloud" "startSsh: true"
+    "gpuTypeId: $(ws_gql_string "$gpu")" "supportPublicIp: true" "gpuCount: $gpu_count"
+    "volumeInGb: $volume" "containerDiskInGb: $disk" "ports: $(ws_gql_string "$ports")"
     "volumeMountPath: \"/workspace\"")
-  [ -n "$image" ] && fields+=("imageName: \"$image\"")
-  [ -n "$template_id" ] && fields+=("templateId: \"$template_id\"")
+  [ -n "$image" ] && fields+=("imageName: $(ws_gql_string "$image")")
+  [ -n "$template_id" ] && fields+=("templateId: $(ws_gql_string "$template_id")")
   [ -n "$min_dl" ] && fields+=("minDownload: $min_dl")
   [ -n "$min_ul" ] && fields+=("minUpload: $min_ul")
   if [ -n "$cuda_versions" ]; then
-    local cv_list; cv_list="$(echo "$cuda_versions" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd, -)"
+    local cv_list="" cv encoded
+    while IFS= read -r cv; do
+      encoded="$(ws_gql_string "$cv")"
+      cv_list="${cv_list:+$cv_list,}$encoded"
+    done < <(printf '%s\n' "$cuda_versions" | tr ',' '\n')
     fields+=("allowedCudaVersions: [$cv_list]")
   fi
-  [ -n "$dc" ] && fields+=("dataCenterId: \"$dc\"")
-  [ -n "$country" ] && fields+=("countryCode: \"$country\"")
+  [ -n "$dc" ] && fields+=("dataCenterId: $(ws_gql_string "$dc")")
+  [ -n "$country" ] && fields+=("countryCode: $(ws_gql_string "$country")")
 
   local joined; joined="$(printf '%s\n' "${fields[@]}" | paste -sd, -)"
   local query="mutation { podFindAndDeployOnDemand(input: { $joined }) { id imageName machineId machine { podHostId } } }"
@@ -269,6 +288,19 @@ cmd_create() {
   [ -n "$template_id" ] || [ -n "$image" ] || die \
     "create: need --template-id or --image (or set WATER_SPIDER_TEMPLATE_ID/WATER_SPIDER_IMAGE). No zorro v3 template exists yet at authoring time — run docker/runpod/create-template.sh first, or pass --image nixpt/zorro:<tag> directly."
   [ -n "$gpu" ] || die "create: --gpu required (see: water-spider gpus --available)"
+  case "$cloud" in SECURE|COMMUNITY) ;; *) die "create: --cloud must be SECURE or COMMUNITY (got '$cloud')" ;; esac
+  ws_require_uint --gpu-count "$gpu_count"
+  ws_require_uint --disk "$disk"
+  ws_require_uint --volume "$volume"
+  [ -z "$min_dl" ] || ws_require_number --min-download "$min_dl"
+  [ -z "$min_ul" ] || ws_require_number --min-upload "$min_ul"
+  if [ -n "$cuda_versions" ]; then
+    local cv
+    while IFS= read -r cv; do
+      [[ "$cv" =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || die "create: --cuda-versions contains invalid version '$cv'"
+    done < <(printf '%s\n' "$cuda_versions" | tr ',' '\n')
+  fi
+  [ -z "$country" ] || [[ "$country" =~ ^[A-Z]{2}$ ]] || die "create: --country must be a two-letter uppercase country code (got '$country')"
   name="${name:-water-spider-$(date +%Y%m%d-%H%M%S)}"
 
   local ledger="" lockdir=""

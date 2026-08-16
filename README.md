@@ -22,7 +22,8 @@ Requires `runpodctl`, `ssh`, `jq`, `pgrep` on PATH, and a RunPod API key in
 `~/.runpod/config.toml` (or `$RUNPOD_API_KEY`). Falls back to
 [`bucket-bridge`](https://github.com/nixpt/buckets) to JIT-provision a
 missing dependency like `jq` rather than hard-failing, if `bucket-bridge`
-is itself available.
+is itself available. GraphQL-only `create` options additionally require
+`curl`; the CLI checks for it only when that path is selected.
 
 ## Test
 
