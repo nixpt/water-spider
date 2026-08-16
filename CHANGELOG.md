@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-16
+
+- docs: add v2 GPU operator guide
+
+
+
 ## [0.4.0] - 2026-08-16
 
 - feat: publish release images to GHCR
