@@ -21,8 +21,9 @@ image. It is not water-spider's semantic version.
 - infers major/minor/patch from conventional commit messages;
 - updates the version and optional changelog;
 - commits, tags, and pushes the result.
-- builds all three Docker variants and publishes moving plus immutable tags to
-  `ghcr.io/nixpt/water-spider`.
+- when image inputs changed, builds all three Docker variants and publishes
+  moving plus immutable tags to `ghcr.io/nixpt/water-spider`;
+- skips container builds for documentation and repository-only releases.
 
 The script intentionally does not invent the initial version. Bootstrap uses a
 manually chosen `VERSION` plus matching tag. An exact-tag guard prevents that

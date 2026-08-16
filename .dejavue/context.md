@@ -42,6 +42,8 @@ dcp: DCP/1.0
 - `.github/workflows/`: ShellCheck/test CI, semantic-version release, and
   release-coupled GHCR publication for all three image variants.
 - `docs/`: architecture, operations, testing, and release guides.
+- `docs/v2-gpu-guide.md`: operator workflow for the GPU image, CUDA llama.cpp,
+  model storage, GUI forwarding, MCP inspection, and teardown.
 - `docs/repository-operations.md`: release bootstrap, ruleset policy, git-ops,
   audits, and branch maintenance.
 - `docker/` + `Dockerfile*`: one-shot CLI, CPU control pod, and CUDA/llama.cpp

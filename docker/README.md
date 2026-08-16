@@ -7,9 +7,10 @@ The public Docker Hub landing page is maintained in
 the same variables and run `scripts/update-dockerhub-description.sh` from the
 repository root.
 
-The same three variants are published to GitHub Container Registry by every
-project release. GHCR authentication uses the workflow's scoped
-`GITHUB_TOKEN`; no registry password is stored in repository secrets.
+The same three variants are published to GitHub Container Registry when a
+release changes an image input. Documentation-only releases skip the expensive
+container builds. GHCR authentication uses the workflow's scoped `GITHUB_TOKEN`;
+no registry password is stored in repository secrets.
 
 ```sh
 docker pull ghcr.io/nixpt/water-spider:latest
@@ -35,6 +36,10 @@ All variants include `water-spider-mcp`. The one-shot `:latest` image can run
 it by overriding the entrypoint; the control images can serve the safe node
 profile on pod loopback when `WATER_SPIDER_MCP_ENABLE=1`. See
 [`../docs/mcp.md`](../docs/mcp.md) for client configuration and SSH tunneling.
+The complete operator walkthrough for v2 is
+[`../docs/v2-gpu-guide.md`](../docs/v2-gpu-guide.md); it covers CUDA setup,
+models, every installed llama.cpp tool, inference tunnels, GUI forwarding,
+storage, MCP, and safe teardown.
 
 ```sh
 docker run --rm -i --entrypoint water-spider-mcp \
@@ -115,6 +120,10 @@ CONTAINER_DISK_GB=60 PUBLISH_PUBLIC=1 \
 ```
 
 ## GPU pod use (`:v2`)
+
+This is only the shortest smoke path. Use the
+[full v2 guide](../docs/v2-gpu-guide.md) for prerequisites and operational
+details.
 
 ```sh
 ssh root@<pod-ip> -p <port>

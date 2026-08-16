@@ -29,6 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       revision: ${{ steps.version.outputs.revision }}
+      publish_images: ${{ steps.images.outputs.publish_images }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,10 +49,23 @@ jobs:
         run: |
           echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Detect image-content changes
+        id: images
+        shell: bash
+        run: |
+          previous_tag="$(git tag --sort=-version:refname --merged HEAD^ | head -n 1)"
+          if [[ -z "$previous_tag" ]] || ! git diff --quiet "$previous_tag" HEAD -- \
+            Dockerfile Dockerfile.runpod Dockerfile.v2 bin mcp \
+            docker/post_start.sh docker/water-spider-pod-init.sh; then
+            echo "publish_images=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_images=false" >> "$GITHUB_OUTPUT"
+          fi
 
   publish-ghcr:
     name: publish GHCR (${{ matrix.tag }})
     needs: bump
+    if: needs.bump.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

@@ -15,6 +15,8 @@ path. Start with the user guides, then use the maintainer references as needed.
   ambiguous creation, SSH, tunnels, and teardown.
 - [`mcp.md`](mcp.md) — agent tool profiles, stdio use, and the in-image
   loopback server reached through an SSH tunnel.
+- [`v2-gpu-guide.md`](v2-gpu-guide.md) — deploy the GPU image, initialize and
+  verify CUDA, download GGUF models, serve llama.cpp, and forward GUI apps.
 
 ## Maintainer and operational references
 

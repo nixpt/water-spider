@@ -22,6 +22,7 @@ equivalent images to GitHub Container Registry next to the source repository.
 - [x] Publication authenticates with the scoped GitHub Actions token.
 - [x] OCI metadata links packages to the source repository and release.
 - [x] GitHub Actions caching is isolated per image variant.
+- [x] Documentation-only releases do not rebuild unchanged images.
 - [x] User and release documentation explain both registries and GHCR tags.
 
 ## Resolution

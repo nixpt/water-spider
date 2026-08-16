@@ -36,6 +36,9 @@ the tracked tunnel without deleting the pod using:
 water-spider tunnel POD-ID --stop
 ```
 
+For the v2 image's GPU initialization, model-download, llama.cpp, GUI, MCP, and
+storage workflow, use the [complete v2 operator guide](v2-gpu-guide.md).
+
 ## Manual service tunnel
 
 For a service already running on remote port 8080:

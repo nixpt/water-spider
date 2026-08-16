@@ -78,6 +78,8 @@ variables, side effects, and examples for every command.
 
 The [Docker image guide](docker/README.md) explains the three image roles,
 builds, public RunPod templates, and verified behavior.
+For the GPU image, follow the dedicated
+[v2 llama.cpp, GPU, and GUI guide](docs/v2-gpu-guide.md).
 
 ## Safety boundaries
 
@@ -98,6 +100,7 @@ cache, and private-image behavior is covered in
 - [CLI reference](docs/cli-reference.md)
 - [Common workflows and troubleshooting](docs/workflows.md)
 - [MCP server for local agents and tunneled pod tools](docs/mcp.md)
+- [v2 GPU, llama.cpp, and GUI applications](docs/v2-gpu-guide.md)
 - [Configuration, credentials, and local state](docs/configuration.md)
 - [Operations and live-validation status](docs/operations.md)
 - [Architecture](docs/architecture.md)

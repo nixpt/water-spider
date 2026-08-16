@@ -107,8 +107,14 @@ The read-only mounts provide RunPod and SSH credentials without baking them
 into the image. See the [Docker image guide](../docker/README.md) for control-pod
 variants and build details.
 
+To run inference on the pod itself, use the `v2` image and continue with the
+[v2 GPU, llama.cpp, and GUI guide](v2-gpu-guide.md). It covers the published
+template, GPU verification, GGUF downloads, SSH-tunneled inference, graphical
+applications, storage, and teardown.
+
 ## Next steps
 
 - Learn every command in the [CLI reference](cli-reference.md).
 - Set defaults using [configuration and state](configuration.md).
 - Follow task-oriented examples in [common workflows](workflows.md).
+- Run CUDA inference or GUI applications with the [v2 guide](v2-gpu-guide.md).

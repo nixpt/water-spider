@@ -23,6 +23,13 @@ The tags are separate products rather than progressively larger versions of
 the same image. Use `latest` from your own machine, `pod` for a small always-on
 orchestrator, and `v2` only when the control pod also needs GPU inference.
 
+The v2 image includes CUDA llama.cpp tools, the Hugging Face CLI, GPU
+initialization and verification, SSH X11 support, and the read-only node MCP
+server. The maintained
+[v2 operator guide](https://github.com/nixpt/water-spider/blob/main/docs/v2-gpu-guide.md)
+covers deployment, GGUF models, GPU inference, tunnels, GUI prerequisites,
+storage, and teardown. It includes `xauth` but not arbitrary GUI applications.
+
 ## Quick start
 
 ```sh

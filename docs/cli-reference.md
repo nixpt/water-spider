@@ -89,6 +89,10 @@ Runs a remote GUI application locally. It prefers xpra when available and falls
 back to SSH X11 forwarding. `--x11` forces raw X11; `--trusted` uses trusted X11
 forwarding. The pod needs the corresponding X11/xpra support.
 
+The `v2` image includes `xauth`, not arbitrary desktop applications. See the
+[v2 GPU and GUI guide](v2-gpu-guide.md) for local display prerequisites,
+installing a pod-side application, security boundaries, and examples.
+
 ## Files and preservation
 
 ### `send` and `receive`
