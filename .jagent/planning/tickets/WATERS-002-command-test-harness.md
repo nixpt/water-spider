@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-002 |
 | **Priority** | P0 |
-| **Status** | Backlog |
+| **Status** | Done |
 | **Phase** | Core health |
 | **Assignee** | unassigned |
 | **Dependencies** | WATERS-001 |
@@ -22,10 +22,10 @@ The CLI has no automated tests. Parsing, idempotency, tunnel PID tracking, snaps
 
 ## Success criteria
 
-- [ ] A deterministic test command exercises every subcommand without network access or account credentials.
-- [ ] Tests replace `runpodctl`, `ssh`, `curl`, `pgrep`, and destructive process operations with controlled fakes.
-- [ ] Failure cases cover malformed JSON, failed API calls, ambiguous SSH information, duplicate idempotency keys, and failed teardown verification.
-- [ ] CI runs the suite on every push and pull request.
+- [x] A deterministic test command exercises every subcommand without network access or account credentials.
+- [x] Tests replace `runpodctl`, `ssh`, `curl`, `pgrep`, and destructive process operations with controlled fakes.
+- [x] Failure cases cover malformed JSON, failed API calls, ambiguous SSH information, duplicate idempotency keys, and failed teardown verification.
+- [x] CI runs the suite on every push and pull request.
 
 ## Technical approach
 
@@ -43,3 +43,7 @@ The CLI has no automated tests. Parsing, idempotency, tunnel PID tracking, snaps
 ## Non-goals
 
 - Spending money or contacting the live RunPod API in routine CI.
+
+## Resolution
+
+Added a dependency-free command harness with controlled fakes for all external integrations. It exercises every dispatch path plus malformed JSON, API failure, ambiguous SSH data, idempotent replay, and unverifiable deletion. The suite reports 22 passing cases, runs in CI, and the README documents local execution. ShellCheck 0.10.0 and `bash -n` also pass across the CLI, harness, and fake executables.

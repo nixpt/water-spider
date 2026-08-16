@@ -24,6 +24,17 @@ Requires `runpodctl`, `ssh`, `jq`, `pgrep` on PATH, and a RunPod API key in
 missing dependency like `jq` rather than hard-failing, if `bucket-bridge`
 is itself available.
 
+## Test
+
+Run the deterministic command suite without RunPod credentials or network access:
+
+```sh
+./tests/run.sh
+```
+
+The suite places controlled fakes for external commands first on `PATH`; it does
+not create pods, open SSH connections, or terminate real processes.
+
 ## Subcommands
 
 - **`create`** — guards the historical flaky-create-makes-billed-dupes

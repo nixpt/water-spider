@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n'
