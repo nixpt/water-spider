@@ -43,13 +43,38 @@ from the finished script, not a `git subtree split`.
   file`) since llama.cpp also produces shared libs the binaries dynamically
   link — fixed by installing `*.so*` to `/usr/local/lib` + `ldconfig`
   before cleanup, in a separate `RUN` so an install-only fix doesn't force
-  a full recompile. `docker/water-spider-pod-init.sh` — GPU clock-lock +
-  verify, ported from `zorro-pod-init.sh` (generic GPU-ops knowledge, not
-  zorro-specific code).
+  a full recompile. Third bug, only visible on REAL hardware (both prior
+  bugs were caught locally): llama.cpp's `GGML_NATIVE` defaults ON
+  upstream (`-march=native`) — baked in THIS dev box's exact CPU, so every
+  binary SIGILL'd (Illegal instruction, core dumped) the instant it ran
+  on a real RunPod pod with a different CPU, despite running fine in
+  local `docker run` smoke tests (same machine that built it). Fixed with
+  an explicit portable baseline (`GGML_NATIVE=OFF`,
+  SSE4.2/AVX/AVX2/BMI2 ON, AVX512 OFF). `docker/water-spider-pod-init.sh`
+  — GPU clock-lock + verify, ported from `zorro-pod-init.sh` (generic
+  GPU-ops knowledge, not zorro-specific code).
 
-**Published RunPod Template:** `water-spider-control-pod-public`
-(id `d5q8gekgxt`, public, CPU category, image `nixpt/water-spider:pod`) —
-created via `docker/create-runpod-template.sh PUBLISH_PUBLIC=1`.
+**Full v2 live-test, real pod, real GPU** (2026-08-16, after the SIGILL
+fix): `water-spider create` (RTX 5090) → SSH → `water-spider-pod-init` →
+`hf download` (Qwen2.5-0.5B GGUF) → `llama-server -ngl 999` →
+`nvidia-smi` confirmed 1384 MiB resident on GPU (not CPU fallback) →
+`water-spider tunnel` → a real `/completion` request from THIS machine
+through the tunnel returned a correct completion at 427 tok/s →
+`water-spider teardown` → independently re-verified gone via a fresh
+`water-spider list`. Cost discipline: the FIRST test pod (pre-fix, hit
+the SIGILL) was torn down immediately rather than left idle while
+rebuilding.
+
+**Published RunPod Templates:**
+- `water-spider-control-pod-public` (id `d5q8gekgxt`, public, CPU
+  category, image `nixpt/water-spider:pod`)
+- `water-spider-gpu-control-pod` (id `q1dp5mbtls`, public, NVIDIA
+  category, image `nixpt/water-spider:v2`)
+
+Both created via `docker/create-runpod-template.sh` (`TAG`/`NAME`/
+`CATEGORY`/`README`/`CONTAINER_DISK_GB` env vars switch which variant;
+`PUBLISH_PUBLIC=1` to publish — isPublic must be set at creation, a
+platform quirk documented in the script's own header).
 
 **RunPod registry auth** (2026-08-16): `nixpt/zorro` was flipped private on
 Docker Hub (via the web UI — the API's own visibility PATCH silently
