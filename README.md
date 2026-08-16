@@ -27,12 +27,13 @@ is itself available.
 ### Or: Docker
 
 A separate, lightweight image ships the CLI itself — no CUDA, no model
-weights, distinct from the `nixpt/zorro` inference image. ~179MB: base +
-`runpodctl` (pinned release, sha256-verified at build time) + `jq` +
-`openssh-client` + a handful of small CLI deps.
+weights, distinct from the `nixpt/zorro` inference image. Published on
+Docker Hub as [`nixpt/water-spider`](https://hub.docker.com/r/nixpt/water-spider).
+~179MB: base + `runpodctl` (pinned release, sha256-verified at build time)
++ `jq` + `openssh-client` + a handful of small CLI deps.
 
 ```sh
-docker build -t nixpt/water-spider .
+docker pull nixpt/water-spider          # or: docker build -t nixpt/water-spider .
 docker run --rm -it \
   -v "$HOME/.runpod:/root/.runpod:ro" \
   -v "$HOME/.ssh:/root/.ssh:ro" \
@@ -45,6 +46,25 @@ script already falls back to raw `ssh -X`/`-Y`); build with
 `--build-arg INCLUDE_XPRA=1` to include it. See the `Dockerfile` header
 for the full run-flag rundown (mounting the X socket for local X11
 forwarding, etc).
+
+### Or: a RunPod "control pod"
+
+Both options above run water-spider on YOUR machine. For a persistent
+orchestrator that lives in RunPod's own network instead — so pods you
+manage stay reachable without a laptop left open — there's a separate
+[`Dockerfile.runpod`](Dockerfile.runpod) variant (published as
+`nixpt/water-spider:pod`) built on RunPod's own base image (same
+self-healing SSH setup validated for `nixpt/zorro`'s image), with
+water-spider preinstalled on `PATH` instead of as the `ENTRYPOINT` — the
+container stays alive as a normal SSH-reachable pod; you `ssh` in and run
+`water-spider ...` by hand to manage your *other* pods.
+
+Published as a public RunPod Template — search "water-spider" in the
+RunPod console, or deploy straight from
+[`docker/create-runpod-template.sh`](docker/create-runpod-template.sh)
+(`PUBLISH_PUBLIC=1` to republish; RunPod templates can't be edited via
+PATCH once public — a platform quirk documented in that script's header —
+so republishing means delete + recreate, not update).
 
 ## Subcommands
 

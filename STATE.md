@@ -17,4 +17,14 @@ development, live-tested fixes) stays in `jokersquad`'s
 `vega/water-spider` branch / squadron PR #29 — this repo starts fresh
 from the finished script, not a `git subtree split`.
 
-**Remote:** `nixpt/water-spider` (public, once pushed).
+**Remote:** `nixpt/water-spider` (public) — https://github.com/nixpt/water-spider
+
+**Published images (Docker Hub, `nixpt/water-spider`):**
+- `:2.9.0` / `:latest` — lightweight one-shot CLI (179MB, `Dockerfile`)
+- `:pod` — RunPod "control pod" variant, persistent SSH-reachable container
+  with water-spider on PATH (2.81GB, `Dockerfile.runpod`, base
+  `runpod/base:1.1.0-rc.154-ubuntu2204`)
+
+**Published RunPod Template:** `water-spider-control-pod-public`
+(id `d5q8gekgxt`, public, CPU category, image `nixpt/water-spider:pod`) —
+created via `docker/create-runpod-template.sh PUBLISH_PUBLIC=1`.

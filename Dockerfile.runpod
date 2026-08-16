@@ -1,0 +1,48 @@
+# water-spider — RunPod "control pod" variant.
+#
+# The top-level Dockerfile's ENTRYPOINT is water-spider itself (one-shot CLI
+# use: `docker run --rm nixpt/water-spider create ...`, exits when the
+# subcommand finishes) — wrong shape for a RunPod Pod deployment, which needs
+# a long-running container. This variant instead builds on RunPod's own base
+# (same setup_ssh()/post_start.sh contract already validated for nixpt/zorro's
+# image), keeps that persistent SSH-serving container as the main process, and
+# installs water-spider onto PATH as a tool you `ssh` in and run — a small
+# always-on pod that manages your OTHER RunPod pods (create/tunnel/recipe/
+# teardown) without needing a laptop left open. No CUDA, no GPU required —
+# this is a CPU-only control plane, matches the top-level image's own
+# "distinct from nixpt/zorro" intent.
+#
+# Build:
+#   docker build -f Dockerfile.runpod -t nixpt/water-spider:pod .
+#
+# Deploy: see docker/create-runpod-template.sh — publishes this image as a
+# RunPod Template so it's one click to launch, same REST v1 API pattern
+# nixpt/zorro's docker/runpod/create-template.sh already uses.
+
+FROM runpod/base:1.1.0-rc.154-ubuntu2204
+
+ARG RUNPODCTL_VERSION=2.9.0
+ARG RUNPODCTL_SHA256=06e6f54957db79d5cd9f1909a7f1d365076826751ba2f5df65d75dde43a64148
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        jq \
+        openssh-client \
+        iproute2 \
+        bsdextrautils \
+        xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /usr/local/bin/runpodctl \
+        "https://github.com/runpod/runpodctl/releases/download/v${RUNPODCTL_VERSION}/runpodctl-linux-amd64" \
+    && echo "${RUNPODCTL_SHA256}  /usr/local/bin/runpodctl" | sha256sum -c - \
+    && chmod +x /usr/local/bin/runpodctl
+
+COPY bin/water-spider /usr/local/bin/water-spider
+RUN chmod +x /usr/local/bin/water-spider
+
+# The base's own /start.sh picks this up automatically via its documented
+# execute_script("/post_start.sh") hook — NO ENTRYPOINT/CMD override (that's
+# the exact mistake the zorro v1 image made: overriding stops the base
+# running sshd/key-injection at all).
+COPY docker/post_start.sh /post_start.sh
+RUN chmod +x /post_start.sh
