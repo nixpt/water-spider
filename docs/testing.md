@@ -14,9 +14,9 @@ The suite currently runs 29 cases. It covers every CLI dispatch path plus API
 failure, malformed JSON, ambiguous SSH data, GraphQL escaping and validation,
 transport errors, idempotent replay, and failed teardown verification.
 
-The release test creates an isolated temporary Git repository. It proves that
-the initial tagged commit is a no-op and that the first later fix selects
-`v0.1.1`; it never pushes or contacts GitHub.
+The release test creates an isolated temporary Git repository. It proves that a
+commit tagged with the current `VERSION` is a no-op and that the first later fix
+selects the next patch version; it never pushes or contacts GitHub.
 
 Fakes for `runpodctl`, `ssh`, `curl`, `pgrep`, `sleep`, `column`, and the
 optional scaffold command are placed first on `PATH`. Tests isolate `HOME` and

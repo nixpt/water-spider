@@ -4,201 +4,111 @@
   <img src="assets/banner-1280x425.png" alt="Water Spider — GPU lifecycle orchestration" width="100%">
 </p>
 
-A thin RunPod GPU-pod-lifecycle CLI built on `runpodctl` (and the RunPod
-GraphQL API for the fields the CLI doesn't expose). Named for the
-lean-manufacturing "water spider" role: ferries supplies so a workstation
-never has to leave its post — here, automates the provision / connect /
-tunnel / teardown dance so it's never hand-run.
+<p align="center">
+  Cost-safe RunPod GPU lifecycle orchestration from one small CLI.
+</p>
 
-Not tied to any specific image — defaults to the `nixpt/zorro` image family
-via `WATER_SPIDER_TEMPLATE_ID`/`WATER_SPIDER_IMAGE`, but works with any
-RunPod pod template.
+Water-spider creates, inspects, connects to, tunnels into, snapshots, and tears
+down RunPod pods. It uses `runpodctl` for standard operations and selects the
+RunPod GraphQL API only when creation needs constraints the CLI does not expose.
 
-## Install
+Its primary invariant is cost safety: creation is never blindly retried, an
+idempotency key can replay a prior successful request, and teardown is not
+reported as successful until a fresh provider query confirms the pod is gone.
+
+## Quick start
 
 ```sh
 git clone https://github.com/nixpt/water-spider.git
-export PATH="$PWD/water-spider/bin:$PATH"
-water-spider --help
+cd water-spider
+export PATH="$PWD/bin:$PATH"
+
+runpodctl doctor
+water-spider status
+water-spider gpus --available
 ```
 
-Requires `runpodctl`, `ssh`, `jq`, `pgrep` on PATH, and a RunPod API key in
-`~/.runpod/config.toml` (or `$RUNPOD_API_KEY`). Falls back to
-[`bucket-bridge`](https://github.com/nixpt/buckets) to JIT-provision a
-missing dependency like `jq` rather than hard-failing, if `bucket-bridge`
-is itself available. GraphQL-only `create` options additionally require
-`curl`; the CLI checks for it only when that path is selected.
-
-## Test
-
-Run the deterministic command suite without RunPod credentials or network access:
+Create a pod only after setting a budget and teardown deadline:
 
 ```sh
-./tests/run.sh
+water-spider create \
+  --image IMAGE \
+  --gpu "GPU NAME" \
+  --idempotency-key "experiment-$(date +%Y%m%d)"
+
+water-spider list
+water-spider connect POD-ID
+water-spider tunnel POD-ID --port 8080:8080
+
+# Pull anything worth keeping, then remove the billable resource.
+water-spider teardown POD-ID
+water-spider list
 ```
 
-The suite places controlled fakes for external commands first on `PATH`; it does
-not create pods, open SSH connections, or terminate real processes.
+Start with the [getting-started guide](docs/getting-started.md) for
+prerequisites, authentication, Docker use, and the first safe lifecycle.
 
-### Or: Docker
+## What it can do
 
-A separate, lightweight image ships the CLI itself — no CUDA, no model
-weights, distinct from the `nixpt/zorro` inference image. Published on
-Docker Hub as [`nixpt/water-spider`](https://hub.docker.com/r/nixpt/water-spider).
-~179MB: base + `runpodctl` (pinned release, sha256-verified at build time)
-+ `jq` + `openssh-client` + a handful of small CLI deps.
+| Area | Commands |
+|---|---|
+| Provision and inspect | `create`, `list`, `status`, `get`, `gpus` |
+| Reach a pod | `connect`, `tunnel`, `gui` |
+| Move and preserve work | `send`, `receive`, `snapshot`, `teardown --pull` |
+| Run inference | `recipe list`, `recipe serve` |
+| Fleet integration | `scaffold` (optional and nixpt-internal) |
 
-```sh
-docker pull nixpt/water-spider          # or: docker build -t nixpt/water-spider .
-docker run --rm -it \
-  -v "$HOME/.runpod:/root/.runpod:ro" \
-  -v "$HOME/.ssh:/root/.ssh:ro" \
-  -p 8080:8080 \
-  nixpt/water-spider gpus --available
-```
+See the [CLI reference](docs/cli-reference.md) for syntax, flags, environment
+variables, side effects, and examples for every command.
 
-`gui`'s `xpra` path isn't baked in by default (keeps the image small — the
-script already falls back to raw `ssh -X`/`-Y`); build with
-`--build-arg INCLUDE_XPRA=1` to include it. See the `Dockerfile` header
-for the full run-flag rundown (mounting the X socket for local X11
-forwarding, etc).
+## Installation choices
 
-### Or: a RunPod "control pod"
+- **Local shell:** put `bin/` on `PATH`; requires `runpodctl`, `ssh`, `jq`, and
+  `pgrep`. GraphQL-only create options additionally require `curl`.
+- **Docker CLI:** run `nixpt/water-spider:latest` from your machine.
+- **CPU control pod:** use `nixpt/water-spider:pod` as a persistent orchestrator
+  that manages other pods.
+- **GPU control pod:** use `nixpt/water-spider:v2` when the orchestrator also
+  needs CUDA llama.cpp inference.
 
-Both options above run water-spider on YOUR machine. For a persistent
-orchestrator that lives in RunPod's own network instead — so pods you
-manage stay reachable without a laptop left open — there's a separate
-[`Dockerfile.runpod`](Dockerfile.runpod) variant (published as
-`nixpt/water-spider:pod`) built on RunPod's own base image (same
-self-healing SSH setup validated for `nixpt/zorro`'s image), with
-water-spider preinstalled on `PATH` instead of as the `ENTRYPOINT` — the
-container stays alive as a normal SSH-reachable pod; you `ssh` in and run
-`water-spider ...` by hand to manage your *other* pods.
+The [Docker image guide](docker/README.md) explains the three image roles,
+builds, public RunPod templates, and verified behavior.
 
-Published as a public RunPod Template — search "water-spider" in the
-RunPod console, or deploy straight from
-[`docker/create-runpod-template.sh`](docker/create-runpod-template.sh)
-(`PUBLISH_PUBLIC=1` to republish; RunPod templates can't be edited via
-PATCH once public — a platform quirk documented in that script's header —
-so republishing means delete + recreate, not update).
+## Safety boundaries
 
-### Or: a GPU control pod with llama.cpp (v2)
+- A create request is attempted once; ambiguous results require inspection.
+- Use `--idempotency-key` anywhere a request may be repeated.
+- Pull valuable artifacts before teardown; pod storage is not a backup.
+- `snapshot` records a lightweight model/provenance manifest, not disk bytes.
+- Live RunPod usage is billable. Tests never use credentials or real resources.
 
-The `:pod` variant above is deliberately CPU-only — it only orchestrates
-*other* pods, no compute of its own. [`Dockerfile.v2`](Dockerfile.v2)
-(published as `nixpt/water-spider:v2`) adds real GPU inference directly
-on the control pod itself: [llama.cpp](https://github.com/ggml-org/llama.cpp)
-built from source with CUDA (no Linux CUDA prebuilt release exists —
-checked directly against upstream's own release assets, Windows-only) +
-the `hf` CLI for pulling GGUF models straight from Hugging Face. Same
-`runpod/pytorch` CUDA base and self-healing SSH setup as `nixpt/zorro`'s
-own image. `zorro` itself is **not** in this image — it stays private;
-this is llama.cpp, a fully separate, general-purpose inference engine.
-
-```sh
-docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
-  --build-arg CUDA_ARCHS="89;90;120" .   # Ada/Hopper/Blackwell; narrow for a faster build
-```
-
-After SSH-ing into a v2 pod, run `water-spider-pod-init` first (GPU
-clock-lock + verify, same reproducible-benchmark discipline zorro's own
-`zorro-pod-init` uses — generic GPU-ops knowledge, not zorro-specific
-code). Then:
-
-```sh
-hf download <repo> <file.gguf> --local-dir /workspace/scratch/models
-llama-server -m /workspace/scratch/models/<file.gguf> --port 8080 -ngl 999
-```
-
-`llama-cli`, `llama-server`, `llama-quantize`, `llama-bench`, and
-`llama-gguf-split` are all on `PATH`.
-
-See [`docker/README.md`](docker/README.md) for the full breakdown of all
-three images (what's in each, why they're separate, the `docker/*.sh`
-helper scripts, live RunPod template ids, and the "verified at authoring
-time" test log for each).
-
-## Subcommands
-
-- **`create`** — guards the historical flaky-create-makes-billed-dupes
-  trap: one attempt, verify by `pod list` after, never blind-retry.
-  `--idempotency-key KEY` makes retries safe — a retried `create` with the
-  same key replays the same pod instead of billing a second one (local
-  ledger + `mkdir`-atomic lock). `--min-download`/`--min-upload`/
-  `--cuda-versions`/`--data-center`/`--country`/`--registry-auth-id` reach
-  GraphQL-only fields `runpodctl`'s own CLI doesn't expose at all (checked:
-  `runpodctl create pod --help`) — a bandwidth floor and an allowed-driver-
-  version filter enforced at creation time instead of discovered (and paid
-  for) after the fact, and a private-registry credential so `--image` can
-  point at a private repo. `--registry-auth-id` defaults from
-  `$WATER_SPIDER_REGISTRY_AUTH_ID` — see
-  [`docker/create-registry-auth.sh`](docker/create-registry-auth.sh) to
-  register a Docker Hub credential with RunPod and get an id. Live-tested
-  end to end: created a real pod against a private image with this set,
-  confirmed via SSH it actually pulled.
-- **`list`** / **`status`** (balance + live spend/hr) / **`get`**
-- **`connect`** — resolves SSH connection info and prints it, with a proxy
-  fallback.
-- **`send`** / **`receive`** — prints the paired `runpodctl send`/`receive`
-  croc commands for moving files to/from a pod.
-- **`tunnel`** — SSH local-port-forward so a pod-side service (e.g. a model
-  server) answers on `localhost` on YOUR machine. A local coding harness
-  points at `http://localhost:8080/v1` and transparently reaches the pod's
-  GPU. Needs only port 22 — no extra RunPod port declarations.
-- **`recipe serve <pod-id> <model-path> [--engine ...] [--port N]`** —
-  launch a model server on the pod, auto-tunnel it, print the ready local
-  URL. The "test model X locally, from a harness on MY machine" workflow
-  in one command.
-- **`gui [--x11|--trusted] [--display N] -- <command...>`** — SSH X11
-  forwarding: a GUI app launched on the pod renders in a window on YOUR
-  machine. Prefers [`xpra`](https://xpra.org/) (SSH-transport-native,
-  survives a dropped connection — `x11docker`'s own pick for seamless-window
-  mode) when installed locally; falls back to raw `ssh -X`/`-Y` otherwise.
-  Needs `xauth`/`xpra` on the pod side and `X11Forwarding yes` in sshd.
-- **`snapshot <pod-id> [-o FILE]`** — a lightweight config MANIFEST (model
-  filenames + image provenance), not a filesystem backup — the pod→home
-  transport is too slow for that.
-- **`teardown <pod-id>`** — the full checklist: reminds you to pull results
-  first, confirms before deleting, deletes, then VERIFIES the pod is
-  actually gone rather than trusting the delete call's exit code.
-- **`gpus [--available]`** — `runpodctl gpu list`, filtered/formatted.
-- **`scaffold <name> [flags...]`** — OPTIONAL, fleet-internal only: a thin
-  passthrough to `foreman-scaffold` (needs a sibling
-  [`jokersquad`](https://github.com/nixpt/jokersquad) checkout). Everything
-  else above works standalone with no other nixpt-fleet repo present.
-
-## Design notes
-
-- One transport-agnostic core script, not a wrapper generator — every
-  subcommand shells out to `runpodctl` or the RunPod GraphQL API directly.
-- Cost-safety first: anything that could spend real money against the live
-  API gets a single, verified attempt — never a blind retry loop.
-- `set -euo pipefail` throughout, with the classic `out="$(cmd)"; rc=$?`
-  trap deliberately avoided (`-e` exits before `rc=$?` ever runs, silently
-  swallowing the error) — every capture uses `|| rc=$?` or
-  `if ! var="$(...)"` instead.
-
-## Status
-
-See `STATE.md` for current status and `.jagent/planning/ROADMAP.md` for
-the plan.
+Read [common workflows](docs/workflows.md) before automating creation,
+inference, file transfer, snapshots, or teardown. Configuration, credential,
+cache, and private-image behavior is covered in
+[configuration and state](docs/configuration.md).
 
 ## Documentation
 
-See [`docs/`](docs/README.md) for architecture, operations, testing, release
-process, Docker/image documentation, and project-state navigation.
+- [Getting started](docs/getting-started.md)
+- [CLI reference](docs/cli-reference.md)
+- [Common workflows and troubleshooting](docs/workflows.md)
+- [Configuration, credentials, and local state](docs/configuration.md)
+- [Operations and live-validation status](docs/operations.md)
+- [Architecture](docs/architecture.md)
+- [Testing](docs/testing.md)
+- [Releasing](docs/releasing.md)
+- [Repository operations](docs/repository-operations.md)
+
+Current evidence and remaining work are recorded in [STATE.md](STATE.md) and
+[the project roadmap](.jagent/planning/ROADMAP.md).
 
 ## Contributing
 
 Contributions from humans and coding agents are welcome. Read
-[`CONTRIBUTING.md`](CONTRIBUTING.md) before starting, especially the rules for
-billable live tests, teardown verification, secrets, and ticket worktrees.
+[CONTRIBUTING.md](CONTRIBUTING.md) before starting, especially the rules for
+billable tests, secrets, teardown verification, and ticket worktrees.
 
 ## License
 
-water-spider is available under either of:
-
-- [MIT License](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
-
-at your option.
+Available under either the [MIT License](LICENSE-MIT) or the
+[Apache License 2.0](LICENSE-APACHE), at your option.

@@ -1,7 +1,20 @@
 # water-spider documentation
 
-The root [`README.md`](../README.md) is the quick start. These documents cover
-the details needed to maintain and operate the project:
+The root [`README.md`](../README.md) is the project overview and shortest safe
+path. Start with the user guides, then use the maintainer references as needed.
+
+## User guides
+
+- [`getting-started.md`](getting-started.md) — prerequisites, authentication,
+  installation choices, and a first safe lifecycle.
+- [`cli-reference.md`](cli-reference.md) — complete command syntax, behavior,
+  side effects, and exit expectations.
+- [`configuration.md`](configuration.md) — environment variables, credentials,
+  private registries, cache directories, and snapshot state.
+- [`workflows.md`](workflows.md) — task-oriented examples and recovery steps for
+  ambiguous creation, SSH, tunnels, and teardown.
+
+## Maintainer and operational references
 
 - [`architecture.md`](architecture.md) — command boundaries, state, safety
   invariants, and repository layout.
