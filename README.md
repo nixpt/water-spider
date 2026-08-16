@@ -24,6 +24,28 @@ Requires `runpodctl`, `ssh`, `jq`, `pgrep` on PATH, and a RunPod API key in
 missing dependency like `jq` rather than hard-failing, if `bucket-bridge`
 is itself available.
 
+### Or: Docker
+
+A separate, lightweight image ships the CLI itself — no CUDA, no model
+weights, distinct from the `nixpt/zorro` inference image. ~179MB: base +
+`runpodctl` (pinned release, sha256-verified at build time) + `jq` +
+`openssh-client` + a handful of small CLI deps.
+
+```sh
+docker build -t nixpt/water-spider .
+docker run --rm -it \
+  -v "$HOME/.runpod:/root/.runpod:ro" \
+  -v "$HOME/.ssh:/root/.ssh:ro" \
+  -p 8080:8080 \
+  nixpt/water-spider gpus --available
+```
+
+`gui`'s `xpra` path isn't baked in by default (keeps the image small — the
+script already falls back to raw `ssh -X`/`-Y`); build with
+`--build-arg INCLUDE_XPRA=1` to include it. See the `Dockerfile` header
+for the full run-flag rundown (mounting the X socket for local X11
+forwarding, etc).
+
 ## Subcommands
 
 - **`create`** — guards the historical flaky-create-makes-billed-dupes
