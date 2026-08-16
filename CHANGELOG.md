@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-16
+
+- feat: add read-only MCP server
+
+
+
 ## [0.2.0] - 2026-08-16
 
 - feat: add water-spider agent skill
