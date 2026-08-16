@@ -33,3 +33,5 @@ path. Start with the user guides, then use the maintainer references as needed.
 
 Planning lives separately under [`.jagent/planning/`](../.jagent/planning/).
 Durable architectural context lives under [`.dejavue/`](../.dejavue/).
+The repository-native agent workflow lives in
+[`../.jagent/skills/water-spider/`](../.jagent/skills/water-spider/SKILL.md).

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Water Spider"
+  short_description: "Operate RunPod GPU pods with cost-safe guardrails"
+  default_prompt: "Use $water-spider to inspect or operate RunPod GPU pods safely."

@@ -22,6 +22,7 @@ full details on each `WATERS-N` ID.
 
 ## P2 — Project Metadata
 
+- [x] [WATERS-015](tickets/WATERS-015-agent-skill.md) — Add a cost-safe water-spider skill for agents
 - [x] [WATERS-014](tickets/WATERS-014-user-guides.md) — Restructure the README and add user-facing guides
 - [x] [WATERS-012](tickets/WATERS-012-dockerhub-documentation.md) — Publish maintained Docker Hub documentation
 - [x] [WATERS-011](tickets/WATERS-011-brand-assets.md) — Create the project logo and repository asset kit

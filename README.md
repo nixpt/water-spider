@@ -102,6 +102,13 @@ cache, and private-image behavior is covered in
 Current evidence and remaining work are recorded in [STATE.md](STATE.md) and
 [the project roadmap](.jagent/planning/ROADMAP.md).
 
+## Agent skill
+
+Agents can use the repository-native [`water-spider` skill](.jagent/skills/water-spider/SKILL.md)
+for lifecycle classification, cost authorization, safe retries, artifact
+preservation, teardown verification, and routing to the appropriate guide.
+Invoke it as `$water-spider` in hosts that discover `.jagent/skills/`.
+
 ## Contributing
 
 Contributions from humans and coding agents are welcome. Read
