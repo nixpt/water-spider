@@ -299,7 +299,8 @@ cmd_create() {
       [ "$tries" -lt 30 ] || die "create: could not acquire idempotency lock for key '$idem_key' after 30s — another 'create' with the same key may be stuck; check/remove $lockdir by hand if you're sure nothing else is running"
       sleep 1
     done
-    # shellcheck disable=SC2064 — intentional early expansion, $lockdir is fixed at trap-set time
+    # Intentional early expansion: lockdir is fixed when the trap is set.
+    # shellcheck disable=SC2064
     trap "rmdir '$lockdir' 2>/dev/null || true" EXIT
     # Re-check under the lock (the genuinely-concurrent case: another
     # process won the race and already committed while we waited).
@@ -514,8 +515,9 @@ cmd_tunnel() {
     info="$(rp_json ssh info "$id")"
     hp="$(ws_resolve_host_port "$info")"; host="${host:-${hp%%:*}}"; port="${port:-${hp##*:}}"
   fi
-  [ -n "$host" ] && [ -n "$port" ] || die \
-    "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    die "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+  fi
 
   [ "${#ports[@]}" -gt 0 ] || ports=("8080:8080" "11450:11450")   # zorro serve / pf serve defaults
   local dashL=()
@@ -572,8 +574,9 @@ EOF
       local info hp host sshport
       info="$(rp_json ssh info "$id")"
       hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; sshport="${hp##*:}"
-      [ -n "$host" ] && [ -n "$sshport" ] || die \
-        "could not resolve pod host/port (see: water-spider connect $id)"
+      if [ -z "$host" ] || [ -z "$sshport" ]; then
+        die "could not resolve pod host/port (see: water-spider connect $id)"
+      fi
 
       local remote_cmd
       case "$engine" in
@@ -640,8 +643,9 @@ cmd_gui() {
     info="$(rp_json ssh info "$id")"
     hp="$(ws_resolve_host_port "$info")"; host="${host:-${hp%%:*}}"; port="${port:-${hp##*:}}"
   fi
-  [ -n "$host" ] && [ -n "$port" ] || die \
-    "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    die "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+  fi
 
   if [ "$force_x11" != 1 ] && command -v xpra >/dev/null 2>&1; then
     echo "==> launching '$*' on $id via xpra (ssh transport, display :$display) — NOT live-tested this session"
@@ -677,7 +681,9 @@ cmd_snapshot() {
   local info hp host port
   info="$(rp_json ssh info "$id")"
   hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; port="${hp##*:}"
-  [ -n "$host" ] && [ -n "$port" ] || die "could not resolve pod host/port (see: water-spider connect $id)"
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    die "could not resolve pod host/port (see: water-spider connect $id)"
+  fi
 
   echo "==> collecting manifest from $id (NOT live-tested this session)"
   local models provenance
