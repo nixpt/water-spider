@@ -1,24 +1,803 @@
 #!/usr/bin/env bash
-# RunPod GPU pod orchestration CLI — create/connect/tunnel/recipe/gui/snapshot, built on runpodctl + the RunPod GraphQL API
+# water-spider — a thin RunPod pod-lifecycle helper, built on `runpodctl` +
+# the fleet's own images (default: nixpt/zorro).
+#
+# NAME: the lean-manufacturing "water spider" role — ferries supplies to a
+# workstation so the worker never has to leave their post. Here: handles
+# provisioning/connect-info/teardown so an agent (or captain) never has to
+# hand-run the runpodctl+ssh dance, and — critically — never forgets the
+# teardown step that stops the billing clock.
+#
+# WHY THIS EXISTS: the runpod-ops skill (~/.claude/skills/runpod-ops/) is the
+# accumulated protocol from two real validation campaigns (s343, s364) plus
+# POD-0811's post-mortem — a lot of it documents MANUAL workarounds for an
+# OLDER runpodctl that lacked structured output and a real pod-lifecycle
+# surface. This tool assumes the CURRENT runpodctl (verified this session:
+# `pod create/list/get/delete`, `ssh info`, `send`/`receive` via croc, all
+# with `-o json`), and automates what used to be manual. It does NOT
+# reimplement the RunPod API — every subcommand is a runpodctl wrapper.
+#
+# HONESTY NOTE (read before trusting a subcommand blind): `create`/`list`/
+# `status`/`get`/`teardown` are tested against a real (empty) account this
+# session — auth works, JSON parses, the empty-list case is exercised.
+# `connect`/`send`/`receive` are NOT live-tested against a real running pod
+# (that costs money to spin up) — they're built correctly against
+# runpodctl's documented interface, but treat them as first-use-verify,
+# not proven, until someone runs them against a real pod.
+#
+# Usage:
+#   water-spider create [--template-id ID] [--image IMG] [--name NAME]
+#                        [--gpu "GPU NAME"] [--gpu-count N] [--ports SPEC]
+#                        [--disk GB] [--volume GB] [--cloud SECURE|COMMUNITY]
+#                        [--restore FILE]    # replay a saved snapshot after boot
+#                        [--idempotency-key KEY]  # retry-safe: same key replays
+#                        #  the same pod instead of creating a second one
+#                        #  (pattern ported from checkstand-core's checkout())
+#                        [--min-download MBPS] [--min-upload MBPS]
+#                        [--cuda-versions "12.4,12.5"] [--data-center ID] [--country CC]
+#                        #  GraphQL-only fields runpodctl's CLI doesn't expose —
+#                        #  given any of these, create switches to a direct
+#                        #  GraphQL call instead of runpodctl (same downstream
+#                        #  id/verify/idempotency logic either way)
+#   water-spider list
+#   water-spider status                    # balance + spend/hr + pod count
+#   water-spider get <pod-id>
+#   water-spider connect <pod-id>          # resolve + print ssh + proxy fallback
+#   water-spider send <local-path>         # you -> pod (prints the paired cmd)
+#   water-spider receive <pod-id> <remote-path> [local-dest]
+#   water-spider tunnel <pod-id> [--port LOCAL:REMOTE ...] [--stop]
+#                        # default ports: 8080 (zorro serve), 11450 (pf serve)
+#   water-spider recipe list
+#   water-spider recipe serve <pod-id> <model-path> [--engine zorro|llama|pf]
+#                        [--port N]        # launch + auto-tunnel + print local URL
+#   water-spider gui <pod-id> [--x11|--trusted] [--display N] [--] <command...>
+#                        # a GUI app launched on the pod renders as a window
+#                        # on YOUR local machine. Prefers xpra (ssh transport,
+#                        # survives a dropped connection) if installed locally;
+#                        # falls back to raw X11 forwarding (--x11 forces it)
+#   water-spider snapshot <pod-id> [-o FILE]   # save model list + image provenance
+#   water-spider teardown <pod-id> [--session-name NAME] [--pull PATH...]
+#   water-spider gpus [--available]        # `runpodctl gpu list`, filtered
+#   water-spider scaffold <name> [foreman-scaffold flags...]
+#                        # OPTIONAL, fleet-internal only: thin passthrough to
+#                        # foreman-scaffold (needs a sibling jokersquad
+#                        # checkout — not available outside the nixpt fleet
+#                        # layout). Everything else above works standalone.
+#
+# Env:
+#   WATER_SPIDER_TEMPLATE_ID   default --template-id for `create`
+#   WATER_SPIDER_IMAGE         default --image for `create` (used only if
+#                               WATER_SPIDER_TEMPLATE_ID is unset)
+#   WATER_SPIDER_SSH_KEY       -i path for the printed ssh command (default:
+#                               ~/.ssh/runpod, matching runpod-ops convention)
+#
+# runpodctl auth: this tool assumes `runpodctl doctor` has already been run
+# (persists the API key to ~/.runpod/config.toml) — same assumption the rest
+# of the fleet's runpod tooling makes. If you need to scope the key
+# per-invocation instead, wrap the whole call:
+#   secure-env run --env RUNPOD_API_KEY -- water-spider <args...>
+#
+# WHAT THIS TOOL DELIBERATELY DOES NOT DO: a byte-for-byte filesystem
+# snapshot/restore of a whole pod. The documented pod→home transport is slow
+# (~0.26 MB/s over the ssh pipe, runpod-ops §7) — genuinely fine for small
+# artifacts, genuinely not for a whole disk. `snapshot`/`--restore` here
+# capture and replay a lightweight MANIFEST (which models are pulled, from
+# which HF repos, plus the image provenance stamp to catch a mismatched
+# restore) — re-provisioning by re-running fast xet downloads on the new pod
+# is both cheaper and more honest than trying to pull the bytes down and
+# back up again. If a real full-disk snapshot is ever wanted, that's RunPod's
+# own network-volume reattachment story, not a job for this tool.
+#
+# Web terminal / Jupyter: untouched by this tool or the image, on purpose —
+# both are the RunPod base's own services (its `/start.sh` starts Jupyter
+# when `$JUPYTER_PASSWORD` is set; the web terminal is the RunPod console's
+# own feature, nothing this tool or the pod image does affects it either
+# way). Nothing here should ever need to.
 set -euo pipefail
 
-usage() {
-    cat <<USAGE
-usage: water-spider <command> [args...]
+SCRIPT_NAME="water-spider"
+SSH_KEY="${WATER_SPIDER_SSH_KEY:-$HOME/.ssh/runpod}"
 
-commands:
-  help          show this message
-USAGE
+die() { echo "$SCRIPT_NAME: $*" >&2; exit 1; }
+
+# `bucket-bridge` (squadron/jokersquad's fleet-safe wrapper over `buckets` —
+# see /workspace/projects/buckets/README.md) can JIT-provision a missing tool
+# into PATH for the rest of this process, rather than hard-failing. Only
+# tried for tools buckets' dist server actually carries (jq: confirmed —
+# `buckets info jq` resolves); NOT a substitute for runpodctl/ssh/pgrep,
+# which are platform/system tools outside buckets' language-runtime scope.
+need_or_bucket() {
+  local tool="$1"
+  command -v "$tool" >/dev/null 2>&1 && return 0
+  local bb="/workspace/projects/jokersquad/bin/bucket-bridge"
+  if [ -x "$bb" ]; then
+    echo "$SCRIPT_NAME: $tool missing, trying bucket-bridge..." >&2
+    local env_out
+    if env_out="$("$bb" env "${tool}@latest" 2>/dev/null)"; then
+      eval "$env_out"
+      command -v "$tool" >/dev/null 2>&1 && { echo "$SCRIPT_NAME: $tool provisioned via buckets" >&2; return 0; }
+    fi
+  fi
+  return 1
+}
+need() { need_or_bucket "$1" || die "missing dependency: $1 (and bucket-bridge couldn't provision it — install manually)"; }
+need runpodctl
+need jq
+need ssh
+need pgrep
+
+usage() {
+  sed -n '/^# Usage:/,/^set -euo/p' "$0" | sed '1d;$d;s/^# \{0,1\}//'
 }
 
-cmd="${1:-help}"
-shift || true
+# runpodctl prints a usage block mixed in with its own JSON error blob on
+# some API-level failures (not just CLI-parse errors) — observed on a plain
+# 404 from `pod get`. Capture combined output, try to surface just the
+# error's message on failure instead of dumping the raw mixed noise.
+rp_json() {
+  local out rc=0
+  # `|| rc=$?`, not `; rc=$?` — under `set -e`, a bare failing assignment
+  # exits the shell immediately, before the next statement ever runs. This
+  # bit the FIRST version of this function (silently swallowed every error,
+  # no message, just a bare exit 1) — verified live before shipping.
+  out="$(runpodctl "$@" -o json 2>&1)" || rc=$?
+  if [ $rc -ne 0 ]; then
+    # runpodctl prints its error TWICE on some failures — a properly-escaped
+    # JSON line to stdout, then a usage block, then a second MALFORMED
+    # (unescaped-quote) JSON blob to stderr. Take the first line that
+    # actually parses as JSON via jq (correctly handles the escaping a
+    # regex extraction got wrong on nested error messages — verified live).
+    local msg
+    msg="$(echo "$out" | grep -m1 '^{' | jq -r '.error // empty' 2>/dev/null)"
+    die "runpodctl ${*} failed${msg:+: $msg}"
+  fi
+  echo "$out"
+}
 
-case "$cmd" in
-    help|-h|--help) usage ;;
-    *)
-        echo "water-spider: unknown command: $cmd" >&2
-        usage >&2
-        exit 1
-        ;;
+# ---- create ------------------------------------------------------------
+# ---- idempotency (ported from checkstand-core's checkout() pattern) -------
+# Real payment gateways (Stripe) and checkstand's own MCP adapter use a
+# caller-supplied idempotency key so a RETRIED call returns the SAME result
+# instead of re-executing — the exact shape of the flaky-create problem
+# runpod-ops already documents (an agent can't always tell if a `pod create`
+# actually landed before a timeout/retry, and a naive retry creates a second
+# BILLED pod). This is a better fix than the "check pod list before/after,
+# never retry" discipline the rest of this function still also does as a
+# second line of defense: a client-side ledger keyed by the idempotency key,
+# checked BEFORE calling runpodctl, with an mkdir-based lock (atomic on
+# POSIX filesystems) covering the genuinely-concurrent-same-key race —
+# checkstand's own two-phase check (cheap pre-check, re-check under the
+# write lock) ported to a bash+filesystem equivalent since there's no
+# in-process lock to hold across a bash script invocation.
+IDEMPOTENCY_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/idempotency"
+
+# ---- GraphQL escape hatch (runpod-python recon) ---------------------------
+# `runpodctl`'s CLI wraps RunPod's REST layer, which does NOT expose two
+# fields the GraphQL API does: `minDownload`/`minUpload` (bandwidth FLOOR at
+# creation time) and `allowedCudaVersions`. Both map directly onto real,
+# already-documented failure classes: POD-0811 was a pod with dead bulk
+# egress discovered 45 minutes and $0.74 into a session (runpod-ops
+# post-mortem) — a bandwidth floor filters that class out BEFORE paying for
+# it. The driver/toolkit PTX version mismatch (runpod-ops "Variations":
+# committed PTX built with a newer CUDA than the pod driver fails at load)
+# is exactly what allowedCudaVersions constrains at the scheduling level
+# instead of discovering after boot. Confirmed these fields are GraphQL-only
+# by reading runpod-python's own mutation builder
+# (runpod/api/mutations/pods.py) — not exposed via REST, hence not via
+# runpodctl. Endpoint/mutation shape verified against runpod-python's
+# graphql.py + mutations/pods.py; API key read from runpodctl's OWN config
+# (~/.runpod/config.toml) so this doesn't need separate auth setup.
+ws_api_key() {
+  [ -n "${RUNPOD_API_KEY:-}" ] && { echo "$RUNPOD_API_KEY"; return; }
+  local cfg="$HOME/.runpod/config.toml"
+  [ -f "$cfg" ] || die "no RUNPOD_API_KEY and no $cfg — run 'runpodctl config' or export RUNPOD_API_KEY"
+  grep -oP "(?<=apikey = ')[^']+" "$cfg" 2>/dev/null || grep -oP '(?<=apikey = ")[^"]+' "$cfg"
+}
+
+# GPU-pod create via GraphQL — only reached when a GraphQL-only flag is
+# given (min_download/min_upload/cuda_versions/data_center/country); the
+# default `create` path stays on runpodctl, already tested and unchanged.
+ws_create_via_graphql() {
+  local name="$1" image="$2" template_id="$3" gpu="$4" gpu_count="$5" \
+        disk="$6" volume="$7" cloud="$8" ports="$9"
+  shift 9
+  local min_dl="$1" min_ul="$2" cuda_versions="$3" dc="$4" country="$5"
+
+  local fields=("name: \"$name\"" "cloudType: $cloud" "startSsh: true"
+    "gpuTypeId: \"$gpu\"" "supportPublicIp: true" "gpuCount: $gpu_count"
+    "volumeInGb: $volume" "containerDiskInGb: $disk" "ports: \"$ports\""
+    "volumeMountPath: \"/workspace\"")
+  [ -n "$image" ] && fields+=("imageName: \"$image\"")
+  [ -n "$template_id" ] && fields+=("templateId: \"$template_id\"")
+  [ -n "$min_dl" ] && fields+=("minDownload: $min_dl")
+  [ -n "$min_ul" ] && fields+=("minUpload: $min_ul")
+  if [ -n "$cuda_versions" ]; then
+    local cv_list; cv_list="$(echo "$cuda_versions" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd, -)"
+    fields+=("allowedCudaVersions: [$cv_list]")
+  fi
+  [ -n "$dc" ] && fields+=("dataCenterId: \"$dc\"")
+  [ -n "$country" ] && fields+=("countryCode: \"$country\"")
+
+  local joined; joined="$(printf '%s\n' "${fields[@]}" | paste -sd, -)"
+  local query="mutation { podFindAndDeployOnDemand(input: { $joined }) { id imageName machineId machine { podHostId } } }"
+  local key; key="$(ws_api_key)"
+  local resp
+  resp="$(curl -sS -X POST "https://api.runpod.io/graphql" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+    -d "$(jq -n --arg q "$query" '{query: $q}')")" || die "GraphQL request failed (network?)"
+  if echo "$resp" | jq -e '.errors' >/dev/null 2>&1; then
+    die "GraphQL create failed: $(echo "$resp" | jq -r '.errors[0].message // .errors' 2>/dev/null)"
+  fi
+  echo "$resp" | jq '{id: .data.podFindAndDeployOnDemand.id}'
+}
+
+cmd_create() {
+  local template_id="${WATER_SPIDER_TEMPLATE_ID:-}"
+  local image="${WATER_SPIDER_IMAGE:-}"
+  local name="" gpu="" gpu_count=1 ports="22/tcp" disk=60 volume=200 cloud="SECURE" restore="" idem_key=""
+  local min_dl="" min_ul="" cuda_versions="" dc="" country=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --template-id) template_id="$2"; shift 2 ;;
+      --image) image="$2"; shift 2 ;;
+      --name) name="$2"; shift 2 ;;
+      --gpu) gpu="$2"; shift 2 ;;
+      --gpu-count) gpu_count="$2"; shift 2 ;;
+      --ports) ports="$2"; shift 2 ;;
+      --disk) disk="$2"; shift 2 ;;
+      --volume) volume="$2"; shift 2 ;;
+      --cloud) cloud="$2"; shift 2 ;;
+      --restore) restore="$2"; shift 2 ;;
+      --idempotency-key) idem_key="$2"; shift 2 ;;
+      # GraphQL-only fields (runpodctl's CLI/REST doesn't expose these —
+      # see ws_create_via_graphql's header note for why they matter):
+      --min-download) min_dl="$2"; shift 2 ;;    # Mbps floor — filters the
+      --min-upload) min_ul="$2"; shift 2 ;;      # POD-0811 dead-egress class
+      --cuda-versions) cuda_versions="$2"; shift 2 ;;  # e.g. "12.4,12.5" —
+                        # filters the driver/toolkit PTX mismatch class
+      --data-center) dc="$2"; shift 2 ;;
+      --country) country="$2"; shift 2 ;;
+      *) die "create: unknown flag '$1'" ;;
+    esac
+  done
+  # NOTE on ports: --ports only affects what RunPod's own proxy/console
+  # exposes. `water-spider tunnel` uses SSH -L (forwarding INSIDE the ssh
+  # session), which only needs port 22 — you do NOT need to declare 8080/
+  # 11450 here just to use tunnel/recipe. Add them only if you want RunPod's
+  # own console/proxy to serve them directly instead.
+  [ -z "$restore" ] || [ -f "$restore" ] || die "create: --restore file not found: $restore"
+  [ -n "$template_id" ] || [ -n "$image" ] || die \
+    "create: need --template-id or --image (or set WATER_SPIDER_TEMPLATE_ID/WATER_SPIDER_IMAGE). No zorro v3 template exists yet at authoring time — run docker/runpod/create-template.sh first, or pass --image nixpt/zorro:<tag> directly."
+  [ -n "$gpu" ] || die "create: --gpu required (see: water-spider gpus --available)"
+  name="${name:-water-spider-$(date +%Y%m%d-%H%M%S)}"
+
+  local ledger="" lockdir=""
+  if [ -n "$idem_key" ]; then
+    mkdir -p "$IDEMPOTENCY_DIR"
+    # Sanitize: a key is caller-supplied, don't let it escape the dir.
+    local safe_key; safe_key="$(echo "$idem_key" | tr -c 'A-Za-z0-9_.-' '_')"
+    ledger="$IDEMPOTENCY_DIR/$safe_key.json"
+    lockdir="$IDEMPOTENCY_DIR/$safe_key.lock"
+
+    # Phase 1 (cheap pre-check, matches checkstand's "common case, no charge
+    # attempted at all"): a prior successful create already exists.
+    if [ -f "$ledger" ]; then
+      local prior_id; prior_id="$(jq -r '.pod_id // empty' "$ledger" 2>/dev/null)"
+      if [ -n "$prior_id" ] && runpodctl pod list -o json 2>/dev/null | jq -e --arg id "$prior_id" '.[] | select(.id==$id)' >/dev/null 2>&1; then
+        echo "==> idempotent replay: key '$idem_key' already created $prior_id — returning it, NOT creating a new pod"
+        runpodctl pod list -o json | jq -r --arg id "$prior_id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // .status // "-")"'
+        return
+      fi
+      echo "==> ledger has a stale entry for key '$idem_key' (pod no longer listed) — proceeding as a fresh create"
+    fi
+
+    # Phase 2 (the race case): acquire the lock. mkdir is atomic — the
+    # loser sees a real failure, not a corrupted partial state.
+    local tries=0
+    until mkdir "$lockdir" 2>/dev/null; do
+      tries=$((tries + 1))
+      [ "$tries" -lt 30 ] || die "create: could not acquire idempotency lock for key '$idem_key' after 30s — another 'create' with the same key may be stuck; check/remove $lockdir by hand if you're sure nothing else is running"
+      sleep 1
+    done
+    # shellcheck disable=SC2064 — intentional early expansion, $lockdir is fixed at trap-set time
+    trap "rmdir '$lockdir' 2>/dev/null || true" EXIT
+    # Re-check under the lock (the genuinely-concurrent case: another
+    # process won the race and already committed while we waited).
+    if [ -f "$ledger" ]; then
+      local prior_id2; prior_id2="$(jq -r '.pod_id // empty' "$ledger" 2>/dev/null)"
+      if [ -n "$prior_id2" ] && runpodctl pod list -o json 2>/dev/null | jq -e --arg id "$prior_id2" '.[] | select(.id==$id)' >/dev/null 2>&1; then
+        echo "==> idempotent replay (post-lock): another call already created $prior_id2 for key '$idem_key'"
+        return
+      fi
+    fi
+  fi
+
+  # The flaky-create trap (runpod-ops §Variations): older runpodctl truncated
+  # its own success JSON and looked like a failure, and a blind retry loop
+  # created 3 billed dupes (s343). Modern runpodctl gives real structured
+  # output — trust ONE attempt, verify by `pod list` after, NEVER auto-retry.
+  # (With --idempotency-key above, a genuine retry is now SAFE too — but the
+  # underlying single-attempt discipline stays, since the key only protects
+  # against re-EXECUTING, not against a create call that's ambiguous by itself.)
+  echo "==> pods before create:"
+  runpodctl pod list -o json | jq -r '.[] | "  \(.id)  \(.name // "-")  \(.desiredStatus // .status // "-")"' 2>/dev/null || echo "  (none)"
+
+  local out
+  if [ -n "$min_dl" ] || [ -n "$min_ul" ] || [ -n "$cuda_versions" ] || [ -n "$dc" ] || [ -n "$country" ]; then
+    echo "==> creating via GraphQL (min-download=$min_dl min-upload=$min_ul cuda-versions=$cuda_versions" \
+         "data-center=$dc country=$country) — runpodctl's CLI doesn't expose these fields"
+    echo "    NOT live-tested this session (would create a real billed pod to verify) —"
+    echo "    endpoint/mutation shape verified against runpod-python's own source, not exercised live"
+    out="$(ws_create_via_graphql "$name" "$image" "$template_id" "$gpu" "$gpu_count" \
+      "$disk" "$volume" "$cloud" "$ports" "$min_dl" "$min_ul" "$cuda_versions" "$dc" "$country")" \
+      || die "GraphQL create failed — check output above, do NOT blindly retry"
+  else
+    local args=(pod create --name "$name" --gpu-id "$gpu" --gpu-count "$gpu_count" \
+      --ports "$ports" --container-disk-in-gb "$disk" --volume-in-gb "$volume" \
+      --cloud-type "$cloud")
+    if [ -n "$template_id" ]; then args+=(--template-id "$template_id"); else args+=(--image "$image"); fi
+
+    echo "==> creating: runpodctl ${args[*]}"
+    out="$(runpodctl "${args[@]}" -o json)" || die "create failed — check output above, do NOT blindly retry (see the flaky-create trap in the header comment)"
+  fi
+  local id
+  id="$(echo "$out" | jq -r '.id // empty')"
+  [ -n "$id" ] || die "create: no pod id in output — inspect manually before retrying:
+$out"
+  echo "==> created pod $id ($name)"
+  if [ -n "$ledger" ]; then
+    jq -n --arg id "$id" --arg key "$idem_key" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{pod_id: $id, idempotency_key: $key, created_at: $ts}' > "$ledger"
+    echo "==> idempotency ledger written: $ledger (a retry with --idempotency-key '$idem_key' will now replay $id, never create a second pod)"
+  fi
+  echo "==> VERIFYING exactly one new pod exists (not a retry-duplicate):"
+  runpodctl pod list -o json | jq -r --arg id "$id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // .status // "-")"'
+  if [ -n "$restore" ]; then
+    echo "==> --restore checklist (HONEST: this is a checklist, not full automation —"
+    echo "    the snapshot only records filenames, not source HF repos, so re-pulling"
+    echo "    is a manual step until that gap is closed):"
+    jq -r '.model_files[]? // empty' "$restore" 2>/dev/null | sed 's/^/    - /' || echo "    (couldn't parse $restore as a water-spider snapshot)"
+    echo "    image this snapshot was taken from: $(jq -r '.image_provenance.base // .image_provenance.zorro_commit // "unknown"' "$restore" 2>/dev/null)"
+  fi
+  echo "==> next: water-spider connect $id   (pod needs a minute to boot before SSH answers)"
+}
+
+# ---- list / status / get ------------------------------------------------
+cmd_list() {
+  local rows
+  rows="$(runpodctl pod list -o json | jq -r '
+    (["ID","NAME","GPU","STATUS","COST/HR"] | @tsv),
+    (.[] | [.id, (.name // "-"), (.machine.gpuDisplayName // .gpuTypeId // "-"),
+            (.desiredStatus // .status // "-"), (.costPerHr // "-" | tostring)] | @tsv)
+  ')" || { echo "(jq failed — raw:)"; runpodctl pod list; return; }
+  echo "$rows" | column -t -s $'\t'
+}
+
+cmd_status() {
+  echo "== account =="
+  runpodctl user -o json | jq -r '"  balance: $\(.clientBalance | tostring)   spend/hr NOW: $\(.currentSpendPerHr)   spend limit: $\(.spendLimit)"'
+  echo "== pods =="
+  local n
+  n="$(runpodctl pod list -o json | jq 'length')" || die "runpodctl pod list failed"
+  if [ "$n" = "0" ]; then
+    echo "  none — nothing billing right now."
+  else
+    cmd_list
+    echo "  ⚠️  $n pod(s) active — every one bills until 'water-spider teardown'."
+  fi
+}
+
+cmd_get() {
+  local id="${1:?usage: water-spider get <pod-id>}"
+  rp_json pod get "$id" | jq .
+}
+
+# ---- connect -------------------------------------------------------------
+# `runpodctl ssh info`'s own --help says "show ssh info (command + key)" —
+# that phrasing suggests a ready-made command STRING, not necessarily
+# separate host/port JSON fields. NOT verified against a real pod's output
+# this session (no billed pod to check against). ws_resolve_host_port tries
+# several plausible shapes and REFUSES cleanly (never silently ssh's to an
+# empty host) if none match — always prefer --host/--port overrides on
+# tunnel/recipe if this guesses wrong on first real use, and fix the parse
+# here once the real shape is known.
+ws_resolve_host_port() {
+  local info="$1" host="" port=""
+  host="$(echo "$info" | jq -r '.host // .ip // .publicIp // empty' 2>/dev/null || true)"
+  port="$(echo "$info" | jq -r '.port // .sshPort // .publicPort // empty' 2>/dev/null || true)"
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    # Fall back to parsing a ready-made command string, e.g.
+    # "ssh root@1.2.3.4 -p 12345 -i ~/.ssh/id_..." in either arg order.
+    local cmd
+    cmd="$(echo "$info" | jq -r '.command // empty' 2>/dev/null || true)"
+    if [ -n "$cmd" ]; then
+      host="$(echo "$cmd" | grep -oP '(?<=@)[0-9A-Za-z_.-]+' | head -1 || true)"
+      port="$(echo "$cmd" | grep -oP '(?<=-p )[0-9]+' | head -1 || true)"
+    fi
+  fi
+  echo "${host}:${port}"
+}
+
+cmd_connect() {
+  local id="${1:?usage: water-spider connect <pod-id>}"
+  local info
+  info="$(rp_json ssh info "$id")"   # rp_json already dies with a clean message on failure
+  echo "$info" | jq . 2>/dev/null || echo "$info"
+  local hp host port
+  hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; port="${hp##*:}"
+  echo
+  if [ -n "$host" ] && [ -n "$port" ]; then
+    echo "==> direct:  ssh -p $port -i $SSH_KEY root@$host"
+  else
+    echo "==> could not parse host:port from the JSON above (unverified shape —"
+    echo "    see ws_resolve_host_port's header note). Read it by eye and pass"
+    echo "    --host/--port explicitly to tunnel/recipe until this is fixed."
+  fi
+  echo "==> proxy fallback (PTY-only — needs -tt, rejects rsync/scp/binary pipes;"
+  echo "    base64-over-tty is the transport workaround, see memory:"
+  echo "    feedback_runpod_proxy_pty_transport): ssh -tt <podid>-<hash>@ssh.runpod.io"
+  echo "==> POD-0811 lesson: if direct SSH refuses while the API says RUNNING,"
+  echo "    try the proxy FIRST — it answers even when sshd on the pod isn't up"
+  echo "    yet, which tells you 'pod is fine, sshd isn't' vs 'pod never scheduled'."
+  echo "    (zorro's v3 image self-heals this automatically via post_start.sh —"
+  echo "    give it ~10-15s after first boot before concluding SSH is broken.)"
+}
+
+# ---- send / receive (runpodctl's croc-based transport) -------------------
+cmd_send() {
+  local path="${1:?usage: water-spider send <local-path>}"
+  echo "==> on THIS machine:"
+  echo "    runpodctl send $path"
+  echo "    (prints a one-time code — e.g. '8338-galileo-tango-alpha')"
+  echo "==> then ON THE POD (via ssh):"
+  echo "    runpodctl receive <the-code-above>"
+  echo "==> NOT live-tested this session (no billed pod to test against) —"
+  echo "    croc's relay is a different data plane than the proxy ssh's PTY"
+  echo "    limit, so it SHOULD sidestep the documented rsync/scp failures"
+  echo "    (feedback_runpod_proxy_pty_transport) — verify on first real use."
+}
+
+cmd_receive() {
+  local id="${1:?usage: water-spider receive <pod-id> <remote-path> [local-dest]}"
+  local remote="${2:?usage: water-spider receive <pod-id> <remote-path> [local-dest]}"
+  local dest="${3:-.}"
+  echo "==> ON THE POD (via ssh -p <port> -i $SSH_KEY root@<host>, see: water-spider connect $id):"
+  echo "    runpodctl send $remote"
+  echo "==> then on THIS machine:"
+  echo "    (cd $dest && runpodctl receive <the-code-from-the-pod>)"
+  echo "==> NOT live-tested this session — same caveat as 'send'."
+}
+
+# ---- tunnel ----------------------------------------------------------------
+# Reverse-of-reverse: a LOCAL port forward (-L), so a service running on the
+# pod (zorro serve :8080, pf serve :11450, ...) answers on localhost on YOUR
+# machine — the point being a local coding harness / IDE agent can point at
+# http://localhost:8080/v1 and transparently reach the pod's GPU, no pod-side
+# awareness needed in the client. Background via `ssh -f -N`; PID tracked so
+# `--stop` can find it again (a plain `pkill -f ssh` would risk killing an
+# unrelated tunnel — see runpod-ops' own pkill-kills-the-wrong-thing trap).
+TUNNEL_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/tunnels"
+
+cmd_tunnel() {
+  local id="" stop=0 host="" port="" ports=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stop) stop=1; shift ;;
+      --port) ports+=("$2"); shift 2 ;;
+      --host) host="$2"; shift 2 ;;
+      --pod-port) port="$2"; shift 2 ;;
+      *) if [ -z "$id" ]; then id="$1"; shift; else die "tunnel: unexpected arg '$1'"; fi ;;
+    esac
+  done
+  [ -n "$id" ] || die "usage: water-spider tunnel <pod-id> [--port LOCAL:REMOTE ...] [--stop]"
+  mkdir -p "$TUNNEL_DIR"
+  local pidfile="$TUNNEL_DIR/$id.pid"
+
+  if [ "$stop" = 1 ]; then
+    [ -f "$pidfile" ] || die "no tracked tunnel for $id (nothing in $pidfile)"
+    local pid; pid="$(cat "$pidfile")"
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" && echo "==> stopped tunnel for $id (pid $pid)"
+    else
+      echo "==> pid $pid (from $pidfile) already gone — cleaning up the stale pidfile"
+    fi
+    rm -f "$pidfile"
+    return
+  fi
+
+  if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    die "a tunnel for $id is already running (pid $(cat "$pidfile")) — 'water-spider tunnel $id --stop' first"
+  fi
+
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    local info hp
+    info="$(rp_json ssh info "$id")"
+    hp="$(ws_resolve_host_port "$info")"; host="${host:-${hp%%:*}}"; port="${port:-${hp##*:}}"
+  fi
+  [ -n "$host" ] && [ -n "$port" ] || die \
+    "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+
+  [ "${#ports[@]}" -gt 0 ] || ports=("8080:8080" "11450:11450")   # zorro serve / pf serve defaults
+  local dashL=()
+  for p in "${ports[@]}"; do dashL+=(-L "${p%%:*}:localhost:${p##*:}"); done
+
+  echo "==> tunneling ${ports[*]} to $host:$port (background)"
+  ssh -f -N "${dashL[@]}" -p "$port" -i "$SSH_KEY" -o ExitOnForwardFailure=yes "root@$host" \
+    || die "ssh tunnel failed to establish — check host/port/key are right (water-spider connect $id)"
+  # ssh -f forks and the parent exits immediately; find the child by matching
+  # our exact invocation rather than trusting $! (which is the already-exited
+  # parent's pid under -f).
+  sleep 1
+  local pid
+  pid="$(pgrep -f "ssh -f -N .* -p $port -i $SSH_KEY .*root@$host" | head -1 || true)"
+  [ -n "$pid" ] || die "tunnel process not found after launch — it may have failed silently, check manually: ps aux | grep 'root@$host'"
+  echo "$pid" > "$pidfile"
+  for p in "${ports[@]}"; do echo "==> http://localhost:${p%%:*}  ->  pod:${p##*:}"; done
+  echo "==> stop with: water-spider tunnel $id --stop"
+}
+
+# ---- recipe ------------------------------------------------------------------
+# The concrete workflow this exists for: "I want to test model X via engine
+# Y from a LOCAL coding harness." Loads the model on the pod (background,
+# logged), tunnels the port, prints the ready-to-use local URL. One command
+# instead of the ssh+nohup+tunnel dance by hand.
+cmd_recipe() {
+  local action="${1:?usage: water-spider recipe <list|serve> ...}"; shift
+  case "$action" in
+    list)
+      cat <<'EOF'
+Available recipes:
+  serve <pod-id> <model-path> [--engine zorro|llama|pf] [--port N]
+      Launch a model server on the pod (background, nohup, logged to
+      ~/serve.log on the pod) and auto-tunnel its port to localhost.
+      --engine zorro (default): `zorro serve <model> --port N`
+      --engine llama:           `llama-server -m <model> --port N -ngl 99`
+      --engine pf:               `pf serve` (pf's own config picks the model —
+                                  point pf's model registry at <model-path>
+                                  first; this recipe does not do that for you)
+EOF
+      ;;
+    serve)
+      local id="${1:?usage: water-spider recipe serve <pod-id> <model-path> [--engine E] [--port N]}"
+      local model="${2:?usage: water-spider recipe serve <pod-id> <model-path> [--engine E] [--port N]}"
+      shift 2
+      local engine="zorro" port=8080
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --engine) engine="$2"; shift 2 ;;
+          --port) port="$2"; shift 2 ;;
+          *) die "recipe serve: unexpected arg '$1'" ;;
+        esac
+      done
+      local info hp host sshport
+      info="$(rp_json ssh info "$id")"
+      hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; sshport="${hp##*:}"
+      [ -n "$host" ] && [ -n "$sshport" ] || die \
+        "could not resolve pod host/port (see: water-spider connect $id)"
+
+      local remote_cmd
+      case "$engine" in
+        zorro) remote_cmd="nohup zorro serve '$model' --port $port > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
+        llama) remote_cmd="nohup llama-server -m '$model' --port $port -ngl 99 > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
+        pf)    remote_cmd="nohup pf serve > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
+        *) die "recipe serve: unknown --engine '$engine' (zorro|llama|pf)" ;;
+      esac
+      echo "==> launching $engine serve on the pod (backgrounded, logged to ~/serve.log there)"
+      echo "    NOT live-tested this session — verify the remote_cmd shape on first real use."
+      ssh -p "$sshport" -i "$SSH_KEY" "root@$host" "$remote_cmd" \
+        || die "remote launch failed — ssh in manually and check ~/serve.log: water-spider connect $id"
+      echo "==> tunneling port $port"
+      cmd_tunnel "$id" --host "$host" --pod-port "$sshport" --port "$port:$port"
+      echo "==> ready: http://localhost:$port  (engine=$engine, model=$model)"
+      ;;
+    *) die "recipe: unknown action '$action' (list|serve)" ;;
+  esac
+}
+
+# ---- gui ---------------------------------------------------------------------
+# Two transports, xpra preferred:
+#
+#   xpra (default when the `xpra` binary is present locally): the seamless-
+#   window transport x11docker (github.com/mviereck/x11docker, the captain's
+#   own reference) itself prefers over raw X11 forwarding for exactly this
+#   reason — X11's wire protocol is chatty and was never designed for a real
+#   network link, where xpra compresses/batches it AND survives a dropped
+#   connection (the remote app keeps running; `xpra attach` again to
+#   reconnect — raw X11 forwarding just kills the app when ssh drops).
+#   `xpra start ssh://root@HOST:PORT/DISPLAY --start=CMD --ssh="ssh -i KEY"`
+#   is the whole thing in one call — xpra owns the ssh connection itself,
+#   we don't need to orchestrate a separate ssh session. Syntax verified
+#   against xpra's own --help + ArchWiki/xpra.org docs, NOT live-tested (no
+#   real remote target available this session).
+#
+#   --x11 (explicit opt-in, or automatic fallback if `xpra` isn't installed
+#   locally): plain `ssh -X`/`-Y` — the same mechanism the "docker-x11"
+#   family (this tool's own original reference point) builds on. Simpler,
+#   zero extra packages beyond `xauth` on the pod (already fixed in the v3
+#   image), but no reconnect-on-drop and worse over real latency.
+#
+# Either way needs a real X server on THIS machine to render into (any
+# normal Linux desktop; macOS needs XQuartz; not attempted on Windows/WSL).
+cmd_gui() {
+  local id="" host="" port="" trusted=0 force_x11=0 display=100
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host) host="$2"; shift 2 ;;
+      --pod-port) port="$2"; shift 2 ;;
+      --trusted) trusted=1; shift ;;   # x11 mode: -Y instead of -X
+      --x11) force_x11=1; shift ;;     # skip xpra even if installed locally
+      --display) display="$2"; shift 2 ;;   # xpra mode: which display number to use
+      --) shift; break ;;
+      *) if [ -z "$id" ]; then id="$1"; shift; else break; fi ;;
+    esac
+  done
+  [ -n "$id" ] || die "usage: water-spider gui <pod-id> [--x11|--trusted] [--] <command...>"
+  [ $# -ge 1 ] || die "usage: water-spider gui <pod-id> [--x11|--trusted] [--] <command...> (e.g. water-spider gui $id -- xterm)"
+  [ -n "${DISPLAY:-}" ] || echo "$SCRIPT_NAME: WARNING — \$DISPLAY is unset on THIS machine; nothing local to render into" >&2
+
+  if [ -z "$host" ] || [ -z "$port" ]; then
+    local info hp
+    info="$(rp_json ssh info "$id")"
+    hp="$(ws_resolve_host_port "$info")"; host="${host:-${hp%%:*}}"; port="${port:-${hp##*:}}"
+  fi
+  [ -n "$host" ] && [ -n "$port" ] || die \
+    "could not resolve pod host/port (see: water-spider connect $id) — pass --host/--pod-port explicitly"
+
+  if [ "$force_x11" != 1 ] && command -v xpra >/dev/null 2>&1; then
+    echo "==> launching '$*' on $id via xpra (ssh transport, display :$display) — NOT live-tested this session"
+    echo "    (verified against xpra's own --help + published docs, no real remote target to test"
+    echo "    against here — if it fails, try 'water-spider gui $id --x11 -- ...' as a fallback,"
+    echo "    or reattach later with: xpra attach \"ssh://root@$host:$port/$display\" -i $SSH_KEY)"
+    xpra start "ssh://root@$host:$port/$display" \
+      --start="$*" --exit-with-children=yes --daemon=no \
+      --ssh="ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new" \
+      || die "xpra launch failed — try --x11 for the simpler raw-X11-forwarding fallback"
+  else
+    local xflag="-X"; [ "$trusted" = 1 ] && xflag="-Y"
+    echo "==> launching '$*' on $id with raw X11 forwarding ($xflag) — NOT live-tested this session"
+    echo "    (no real X client to verify against in this environment — verify on first real use;"
+    echo "    if the window never appears, check: pod has xauth installed, sshd_config has"
+    echo "    X11Forwarding yes, and \$DISPLAY is actually set on THIS machine)"
+    [ "$force_x11" = 1 ] || echo "    (xpra not found locally — falling back to X11 forwarding; 'apt install xpra' for the more robust transport)"
+    ssh "$xflag" -p "$port" -i "$SSH_KEY" "root@$host" "$@"
+  fi
+}
+
+# ---- snapshot / restore -------------------------------------------------------
+# Lightweight config manifest, NOT a filesystem backup — see the header note
+# for why. Captures: image provenance (/etc/zorro-image.json, so a restore
+# onto a different image build is a loud choice, not a silent mismatch), and
+# the model filenames present under ZORRO_MODELS_DIR (re-derivable by name,
+# not by copying bytes — a restore re-pulls them via `hf download`, which the
+# xet CDN path makes fast, rather than trying to move the file itself).
+cmd_snapshot() {
+  local id="${1:?usage: water-spider snapshot <pod-id> [-o FILE]}"; shift
+  local out="water-spider-snapshot-$id.json"
+  [ "${1:-}" = "-o" ] && out="$2"
+  local info hp host port
+  info="$(rp_json ssh info "$id")"
+  hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; port="${hp##*:}"
+  [ -n "$host" ] && [ -n "$port" ] || die "could not resolve pod host/port (see: water-spider connect $id)"
+
+  echo "==> collecting manifest from $id (NOT live-tested this session)"
+  local models provenance
+  models="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" \
+    'ls "${ZORRO_MODELS_DIR:-/workspace/scratch/models}" 2>/dev/null | jq -R -s "split(\"\n\") | map(select(length>0))"' \
+    2>/dev/null || echo '[]')"
+  provenance="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" 'cat /etc/zorro-image.json 2>/dev/null || echo "{}"')"
+  jq -n --argjson models "$models" --argjson provenance "$provenance" --arg pod "$id" \
+    '{pod_id: $pod, image_provenance: $provenance, model_files: $models,
+      note: "manifest only — re-provisions by filename via hf download, does not carry bytes"}' \
+    > "$out"
+  echo "==> wrote $out"
+  echo "==> replay on a fresh pod (once running): print the model list and re-pull each"
+  echo "    by name — this tool doesn't know which HF repo each file came from, so"
+  echo "    restoring is a starting checklist, not a fully automated step yet:"
+  jq -r '.model_files[]' "$out" 2>/dev/null | sed 's/^/    - /'
+}
+
+# ---- teardown --------------------------------------------------------------
+cmd_teardown() {
+  local id="" session_name="" pull_paths=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --session-name) session_name="$2"; shift 2 ;;
+      --pull) pull_paths+=("$2"); shift 2 ;;
+      *) if [ -z "$id" ]; then id="$1"; shift; else die "teardown: unexpected arg '$1'"; fi ;;
+    esac
+  done
+  [ -n "$id" ] || die "usage: water-spider teardown <pod-id> [--session-name NAME] [--pull PATH...]"
+
+  echo "== teardown checklist (runpod-ops §7) =="
+  echo "[ ] 1. Read the pod's final sync.txt (if multi-agent) for unpulled findings."
+  echo "       water-spider receive $id /workspace/sync.txt ."
+  echo "[ ] 2. Results committed + pushed from THIS box (not the pod — it is a"
+  echo "       transport, never a repo of record)."
+  if [ "${#pull_paths[@]}" -gt 0 ]; then
+    echo "[ ] 3. Pull requested small artifacts (you must run these — this tool"
+    echo "       only prints the paired commands, see 'send'/'receive' above):"
+    for p in "${pull_paths[@]}"; do
+      echo "       water-spider receive $id '$p' ${session_name:+workspace-meta/ops/runpod-$session_name/}"
+    done
+  else
+    echo "[ ] 3. (no --pull paths given — pull anything worth keeping BEFORE"
+    echo "       confirming below; nothing on the pod survives delete)"
+  fi
+  echo
+  read -r -p "Confirmed 1+2(+3) are done — proceed with pod delete? [y/N] " ans
+  case "$ans" in
+    y|Y) : ;;
+    *) echo "aborted — pod $id is still running and BILLING."; exit 1 ;;
+  esac
+
+  echo "==> deleting $id"
+  runpodctl pod delete "$id" -o json | jq . 2>/dev/null || true
+
+  echo "==> VERIFYING it's actually gone (every idle hour bills):"
+  sleep 2
+  local still
+  # This is the single highest-value check in the whole tool — if the list
+  # call itself fails, that must read as "UNKNOWN, go check by hand", never
+  # as silent success (the set -e assignment trap this file already hit
+  # once would turn a transient network blip into a false all-clear here).
+  if ! still="$(runpodctl pod list -o json | jq -r --arg id "$id" '.[] | select(.id==$id) | .id')"; then
+    echo "⚠️  could not verify — 'runpodctl pod list' itself failed. UNKNOWN"
+    echo "    whether $id is really gone. Check manually: runpodctl pod get $id"
+    exit 1
+  fi
+  if [ -n "$still" ]; then
+    echo "⚠️  $id STILL LISTED — delete may not have taken. Re-check manually:"
+    echo "    runpodctl pod get $id"
+    exit 1
+  fi
+  echo "==> confirmed gone. Remember: stop any local watcher polling this pod"
+  echo "    (its ssh now exits 255 and reads as a failure, not a signal)."
+}
+
+# ---- gpus ------------------------------------------------------------------
+cmd_gpus() {
+  local available_only=0
+  [ "${1:-}" = "--available" ] && available_only=1
+  local filter='.'
+  [ "$available_only" = 1 ] && filter='map(select(.available))'
+  runpodctl gpu list -o json | jq -r "$filter | .[] | \"\(.gpuId)\t\(.memoryInGb)GB\t\(.stockStatus)\t\(if .communityCloud then \"community\" else \"secure-only\" end)\"" \
+    | column -t -s $'\t'
+}
+
+# ---- scaffold (optional, fleet-internal) -------------------------------------
+# Thin passthrough to `foreman-scaffold` — a nixpt-fleet project bootstrapper
+# (dejavue init, .jagent planning board, bump-version --install, gh-ruleset,
+# gh repo create). Not part of water-spider's own job (RunPod pod ops); kept
+# here only because water-spider itself was scaffolded this way and it's a
+# convenient place to reach it from. NOT available outside the nixpt fleet
+# checkout layout — every other subcommand works standalone, this one alone
+# needs a sibling `jokersquad` checkout on PATH or at the well-known path.
+cmd_scaffold() {
+  local fs
+  fs="$(command -v foreman-scaffold 2>/dev/null || true)"
+  [ -x "$fs" ] || fs="/workspace/projects/jokersquad/bin/foreman-scaffold"
+  [ -x "$fs" ] || die "foreman-scaffold not found (fleet-internal command, needs a jokersquad checkout — not available outside the nixpt fleet layout)"
+  exec "$fs" "$@"
+}
+
+# ---- dispatch ---------------------------------------------------------------
+[ $# -ge 1 ] || { usage; exit 1; }
+sub="$1"; shift
+case "$sub" in
+  create)    cmd_create "$@" ;;
+  list|ls)   cmd_list "$@" ;;
+  status)    cmd_status "$@" ;;
+  get)       cmd_get "$@" ;;
+  connect)   cmd_connect "$@" ;;
+  send)      cmd_send "$@" ;;
+  receive)   cmd_receive "$@" ;;
+  tunnel)    cmd_tunnel "$@" ;;
+  recipe)    cmd_recipe "$@" ;;
+  gui)       cmd_gui "$@" ;;
+  snapshot)  cmd_snapshot "$@" ;;
+  teardown)  cmd_teardown "$@" ;;
+  gpus)      cmd_gpus "$@" ;;
+  scaffold)  cmd_scaffold "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac
