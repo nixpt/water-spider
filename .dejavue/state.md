@@ -1,5 +1,5 @@
 # State
 
-Updated: 2026-08-16T10:50:27-05:00
+Updated: 2026-08-16T11:06:09-05:00
 
-water-spider is a published cost-safe Bash CLI and three-image control-pod family. The core create/SSH/tunnel/GPU-inference/teardown path has live evidence; 29 deterministic tests and ShellCheck 0.10.0 pass. Documentation is consolidated under docs/. Remaining work is WATERS-003 peripheral live workflows and WATERS-005 initial project version/tag.
+water-spider release automation is bootstrapped at VERSION/v0.1.0 with exact-tag no-op protection and isolated bump tests. CI covers the full shell surface at ShellCheck 0.10.0. GitHub fleet-default protection blocks deletion and force-push of main; git-ops governs task worktrees. Remaining product validation is WATERS-003.

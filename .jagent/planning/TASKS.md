@@ -7,7 +7,7 @@ full details on each `WATERS-N` ID.
 
 ## P0 — Build & Core Health
 
-- [ ] [WATERS-010](tickets/WATERS-010-release-gitops.md) — Repair release bootstrap and add repository safety rails
+- [x] [WATERS-010](tickets/WATERS-010-release-gitops.md) — Repair release bootstrap and add repository safety rails
 - [x] [WATERS-001](tickets/WATERS-001-shellcheck-clean.md) — Make `shellcheck bin/water-spider` clean
 - [x] [WATERS-002](tickets/WATERS-002-command-test-harness.md) — Add a mocked command-level test harness
 - [ ] [WATERS-003](tickets/WATERS-003-live-runpod-validation.md) — Validate unproven workflows against one controlled live pod
@@ -15,7 +15,7 @@ full details on each `WATERS-N` ID.
 
 ## P1 — Release Readiness
 
-- [ ] [WATERS-005](tickets/WATERS-005-release-bootstrap.md) — Bootstrap versioning, remote, and initial release
+- [x] [WATERS-005](tickets/WATERS-005-release-bootstrap.md) — Bootstrap versioning, remote, and initial release
 - [x] [WATERS-007](tickets/WATERS-007-community-docs.md) — Add public repository and contribution conventions
 - [x] [WATERS-009](tickets/WATERS-009-docs-refresh.md) — Reconcile project documentation and navigation
 

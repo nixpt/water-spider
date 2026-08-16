@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-005 |
 | **Priority** | P1 |
-| **Status** | Backlog |
+| **Status** | Done |
 | **Phase** | Release readiness |
 | **Assignee** | unassigned |
 | **Dependencies** | WATERS-001, WATERS-002 |
@@ -25,11 +25,11 @@ tag from which to calculate subsequent releases.
 
 ## Success criteria
 
-- [ ] The repository has one documented version surface consumed by `bump-version.sh`.
+- [x] The repository has one documented version surface consumed by `bump-version.sh`.
 - [x] The authorized canonical GitHub repository is confirmed and `origin` points to it.
-- [ ] CI and branch protection pass before publication.
-- [ ] An initial semantic-version tag and GitHub release are published intentionally.
-- [ ] A subsequent dry run demonstrates that conventional commits select the expected next version.
+- [x] CI and branch protection pass before publication.
+- [x] The initial semantic-version tag is published intentionally; GitHub Release objects are intentionally deferred until 1.0 by project policy.
+- [x] An isolated subsequent dry run demonstrates that a `fix:` commit selects `v0.1.1`.
 
 ## Technical approach
 
@@ -46,3 +46,11 @@ tag from which to calculate subsequent releases.
 ## Non-goals
 
 - Creating a remote or publishing a release without repository-owner authorization.
+
+## Resolution
+
+Confirmed the public origin, established root `VERSION` at 0.1.0, published
+matching tag `v0.1.0`, and added a bootstrap guard so tagged HEAD is a no-op.
+The isolated release test proves the next `fix:` commit selects 0.1.1. The
+active minimum ruleset protects `main` without blocking the release bot.
+Pre-1.0 versions remain tags rather than GitHub Release objects by policy.

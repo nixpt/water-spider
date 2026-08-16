@@ -95,7 +95,8 @@ independent absence verification. `send`/`receive`, the `recipe serve` wrapper,
 GUI forwarding, and snapshot collection remain explicitly unproven on a live
 pod (WATERS-003).
 
-**Release state:** the canonical GitHub remote is configured and current work
-has been pushed. The project still has no `VERSION` or `v*` tag; Docker tag
-`2.9.0` is the bundled `runpodctl` version, not a water-spider release. See
-`docs/releasing.md` and WATERS-005.
+**Release state:** the canonical GitHub remote is configured; `VERSION` and
+`v0.1.0` establish the project release line. The release workflow no-ops on an
+already-tagged HEAD and bumps later conventional commits. Docker tag `2.9.0`
+remains the bundled `runpodctl` version, not a water-spider project release.
+The active fleet-default ruleset blocks deletion and force-push of `main`.

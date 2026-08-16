@@ -16,9 +16,10 @@ inference, local tunnel, HTTP completion, teardown, and independent absence
 verification. Transfer, recipe-wrapper, GUI, and snapshot paths remain open in
 WATERS-003.
 
-**Release:** `origin` is the public `nixpt/water-spider` repository and project
-work has been pushed. WATERS-005 remains open only for the initial project
-version surface, tag/release, and subsequent bump proof.
+**Release:** `origin` is the public `nixpt/water-spider` repository. Root
+`VERSION` and tag `v0.1.0` establish the project release line; isolated tests
+prove the next fix selects v0.1.1. GitHub's active fleet-default ruleset blocks
+deletion and force-push of `main` without blocking release automation.
 
 **Documentation:** root quick start plus `docs/` architecture, operations,
 testing, and release guides; `docker/README.md` owns image details.

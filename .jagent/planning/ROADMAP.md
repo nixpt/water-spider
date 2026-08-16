@@ -27,8 +27,9 @@ remain.
   - WATERS-004: safe GraphQL input construction and validation
 - **M1 — Operational validation** — core path proven; peripheral paths pending
   - WATERS-003: validate transfer, recipe wrapper, GUI, and snapshot workflows
-- **M2 — Public release** — remote and public docs complete; version pending
-  - WATERS-005: establish version surface, initial tag/release, and bump proof
+- **M2 — Public release** — complete
+  - WATERS-005: version surface, initial tag, ruleset, and bump proof
+  - WATERS-010: CI/release bootstrap repair and repository safety tooling
 - **M3 — Planning hygiene** — complete
   - WATERS-006: accurate project metadata, roadmap, and persistent context
   - WATERS-007: public contribution, license, and changelog conventions

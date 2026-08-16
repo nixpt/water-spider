@@ -27,6 +27,9 @@ manually chosen `VERSION` plus matching tag. An exact-tag guard prevents that
 initial push from immediately consuming a patch release; later untagged pushes
 resume conventional-commit bumping.
 
+Pre-1.0 releases are Git tags without GitHub Release objects. Beginning at 1.0,
+the script also creates a GitHub Release with generated notes.
+
 ## Image publication
 
 Project releases and container publication are separate surfaces. Image build
