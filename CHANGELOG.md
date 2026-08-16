@@ -7,10 +7,14 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
-- Add dual MIT/Apache-2.0 licensing and public contribution guidance.
-- Add deterministic command tests and harden GraphQL pod creation.
-- Add standalone, CPU-control-pod, and CUDA/llama.cpp image variants.
+## [0.1.0] - 2026-08-16
 
-The repository has not established its first project-version tag yet. Docker
-image tag `2.9.0` identifies the bundled `runpodctl` release and is not a
-water-spider semantic-version claim.
+- Initial standalone RunPod lifecycle CLI.
+- Cost-safe creation, idempotency, verified teardown, tunnels, recipes, GUI
+  forwarding, and lightweight snapshots.
+- Deterministic 29-case command suite and hardened GraphQL creation path.
+- Standalone, CPU-control-pod, and CUDA/llama.cpp GPU image variants.
+- Dual MIT/Apache-2.0 licensing and public contribution documentation.
+
+Docker image tag `2.9.0` identifies the bundled `runpodctl` release and is
+separate from water-spider's project version.

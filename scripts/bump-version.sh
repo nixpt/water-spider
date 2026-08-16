@@ -44,6 +44,13 @@ if [ -z "$LAST_TAG" ]; then
   exit 0
 fi
 
+# Bootstrap-safe: the initial VERSION commit and matching tag are pushed
+# together. Do not consume a patch version before post-release work exists.
+if git describe --exact-match --tags --match 'v[0-9]*' HEAD >/dev/null 2>&1; then
+  log "HEAD is already tagged $LAST_TAG — nothing new to release."
+  exit 0
+fi
+
 SUBJECTS="$(git log --pretty=format:'%s%n%b' "${LAST_TAG}..HEAD" 2>/dev/null || true)"
 bump="patch"
 if printf '%s' "$SUBJECTS" | grep -qiE '(^|[[:space:]])BREAKING[[:space:]]CHANGE|^[a-z]+(\([^)]*\))?!:'; then
@@ -167,7 +174,11 @@ if [ -f CHANGELOG.md ]; then
       END { if (!done) printf "%s", entry }
     ' CHANGELOG.md > CHANGELOG.md.tmp
   fi
-  [ -s CHANGELOG.md.tmp ] && mv CHANGELOG.md.tmp CHANGELOG.md || rm -f CHANGELOG.md.tmp
+  if [ -s CHANGELOG.md.tmp ]; then
+    mv CHANGELOG.md.tmp CHANGELOG.md
+  else
+    rm -f CHANGELOG.md.tmp
+  fi
   rm -f "$ENTRY_FILE"
   log "appended mechanical CHANGELOG.md entry for v${NEXT}"
 fi
@@ -208,9 +219,11 @@ if git remote get-url origin >/dev/null 2>&1; then
   # succeeded and is the source of truth either way.
   if [ "$MA" -ge 1 ] 2>/dev/null; then
     if command -v gh >/dev/null 2>&1; then
-      gh release create "v${NEXT}" --title "v${NEXT}" --generate-notes --target "${MAIN_BRANCH}" \
-        && log "created GitHub Release v${NEXT}" \
-        || log "gh release create failed (non-fatal) — tag+push already succeeded"
+      if gh release create "v${NEXT}" --title "v${NEXT}" --generate-notes --target "${MAIN_BRANCH}"; then
+        log "created GitHub Release v${NEXT}"
+      else
+        log "gh release create failed (non-fatal) — tag+push already succeeded"
+      fi
     else
       log "gh CLI not available — tag pushed, no GitHub Release object created"
     fi

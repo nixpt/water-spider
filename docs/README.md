@@ -11,6 +11,8 @@ the details needed to maintain and operate the project:
   between mocked and billable verification.
 - [`releasing.md`](releasing.md) — version surface, tags, workflows, images, and
   the remaining initial-release work.
+- [`repository-operations.md`](repository-operations.md) — `gh-ruleset`,
+  `git-ops`, release bootstrap, audits, and branch maintenance.
 - [`../docker/README.md`](../docker/README.md) — image variants, build details,
   RunPod templates, and recorded image-validation evidence.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — contribution and agent workflow.

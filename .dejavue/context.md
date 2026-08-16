@@ -23,8 +23,8 @@ dcp: DCP/1.0
 
 ## Build / Test
 
-- Syntax: `bash -n bin/water-spider tests/run.sh tests/fakes/* docker/*.sh`
-- Static analysis: `shellcheck bin/water-spider tests/run.sh tests/fakes/* docker/*.sh`
+- Syntax: `bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh`
+- Static analysis: `shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh`
 - Deterministic suite: `./tests/run.sh` (no network, credentials, pods, or real
   SSH/process operations)
 
@@ -36,6 +36,8 @@ dcp: DCP/1.0
 - `.jagent/planning/`: backlog, roadmap, execution rules, and ticket evidence.
 - `.github/workflows/`: ShellCheck/test CI and semantic-version release job.
 - `docs/`: architecture, operations, testing, and release guides.
+- `docs/repository-operations.md`: release bootstrap, ruleset policy, git-ops,
+  audits, and branch maintenance.
 - `docker/` + `Dockerfile*`: one-shot CLI, CPU control pod, and CUDA/llama.cpp
   GPU control pod; `docker/README.md` owns image-specific evidence.
 

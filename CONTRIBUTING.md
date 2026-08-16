@@ -40,9 +40,10 @@ their claims are affected.
 Before submitting:
 
 ```sh
-bash -n bin/water-spider tests/run.sh tests/fakes/* docker/*.sh
-shellcheck bin/water-spider tests/run.sh tests/fakes/* docker/*.sh
+bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh
+shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/fakes/* docker/*.sh
 ./tests/run.sh
+./tests/release.sh
 git diff --check
 ```
 
@@ -59,9 +60,10 @@ Use conventional-commit subjects where practical:
 - `docs:`, `test:`, or `chore:` for supporting changes
 - `feat!:` or a `BREAKING CHANGE` footer for incompatible changes
 
-Versioning is handled by `scripts/bump-version.sh` and the release workflow once
-the initial version and tag exist. Do not create release tags casually: a tag is
-part of the public compatibility history.
+Versioning is handled by `scripts/bump-version.sh` and the release workflow.
+Task worktrees should use Jokersquad's `git-ops seal`; only the primary checkout
+ships reviewed work. Do not create release tags casually: a tag is part of the
+public compatibility history. See `docs/repository-operations.md`.
 
 ## For coding agents
 
