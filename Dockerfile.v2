@@ -67,12 +67,23 @@ RUN pip install --no-cache-dir --break-system-packages 'huggingface_hub[cli]' hf
 # skipped, not CUDA compute itself). Checked ggml/src/ggml-cuda/CMakeLists.txt
 # directly rather than guessing: `target_link_libraries(... CUDA::cuda_driver)`
 # is gated behind `if (NOT GGML_CUDA_NO_VMM)`.
+# GGML_NATIVE defaults ON upstream (-march=native, i.e. targets THIS BUILD
+# MACHINE's exact CPU) — a real bug found live: the RunPod pod's host CPU
+# doesn't support some instruction this dev box's CPU has, and every
+# llama.cpp binary SIGILL'd (Illegal instruction, core dumped) the instant
+# it ran on a real pod, despite working fine in local docker-run smoke
+# tests (same machine that built it). Explicit portable baseline instead —
+# SSE4.2/AVX/AVX2/BMI2 are universal on any x86-64 cloud/server CPU from
+# the last decade; AVX512 stays off since it's NOT universal and would
+# reintroduce the same class of crash on an older host.
 RUN git clone --depth 1 --branch "${LLAMACPP_REF}" https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp \
     && git -C /opt/llama.cpp rev-parse HEAD > /opt/llama.cpp.commit \
     && cmake -B /opt/llama.cpp/build -S /opt/llama.cpp \
          -DGGML_CUDA=ON -DGGML_CUDA_NO_VMM=ON \
          -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
          -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF \
+         -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON \
+         -DGGML_AVX512=OFF \
     && cmake --build /opt/llama.cpp/build --config Release -j"$(nproc)" \
          --target llama-cli llama-server llama-quantize llama-bench llama-gguf-split
 
