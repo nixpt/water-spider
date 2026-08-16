@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${FAKE_SSH_REQUIRE_AGENT:-0}" = "1" ] && [[ "$*" == *"llama-server"* ]]; then
+  [[ "$*" == *"--host 127.0.0.1"* ]]
+  [[ "$*" == *"--jinja -fa --alias speedy"* ]]
+fi
+
 case " $* " in
   *"zorro-image.json"*) printf '{"base":"test-image"}\n' ;;
   *"ZORRO_MODELS_DIR"*) printf '["test.gguf"]\n' ;;

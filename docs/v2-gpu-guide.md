@@ -128,6 +128,11 @@ water-spider recipe serve POD-ID \
   --engine llama --port 8080
 ```
 
+For an OpenAI-compatible endpoint configured for local coding agents, use
+`--engine llama-agent`. It binds to pod loopback and enables llama.cpp's Jinja
+tool-call path. Follow the [Mayfly + OpenCode guide](mayfly-opencode.md); the
+selected GGUF must include a compatible tool-use chat template.
+
 Confirm actual GPU use instead of assuming offload succeeded:
 
 ```sh

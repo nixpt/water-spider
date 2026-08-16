@@ -23,8 +23,8 @@ dcp: DCP/1.0
 
 ## Build / Test
 
-- Syntax: `bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh`
-- Static analysis: `shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh`
+- Syntax: `bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly`
+- Static analysis: `shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly`
 - Deterministic suite: `./tests/run.sh` (no network, credentials, pods, or real
   SSH/process operations)
 - MCP: `cargo fmt --manifest-path mcp/Cargo.toml --check`,
@@ -44,6 +44,8 @@ dcp: DCP/1.0
 - `docs/`: architecture, operations, testing, and release guides.
 - `docs/v2-gpu-guide.md`: operator workflow for the GPU image, CUDA llama.cpp,
   model storage, GUI forwarding, MCP inspection, and teardown.
+- `integrations/mayfly-opencode/`: local Mayfly/OpenCode bridge to the v2
+  image's loopback-only, tunneled llama.cpp agent endpoint.
 - `docs/repository-operations.md`: release bootstrap, ruleset policy, git-ops,
   audits, and branch maintenance.
 - `docker/` + `Dockerfile*`: one-shot CLI, CPU control pod, and CUDA/llama.cpp

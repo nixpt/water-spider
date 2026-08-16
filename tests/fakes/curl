@@ -2,6 +2,7 @@
 set -euo pipefail
 
 payload=""
+args="$*"
 while [ $# -gt 0 ]; do
   if [ "$1" = "-d" ]; then
     payload="$2"
@@ -19,5 +20,11 @@ fi
 case "${FAKE_CURL_MODE:-ok}" in
   transport-fail) exit 7 ;;
   graphql-error) printf '{"errors":[{"message":"no capacity"}]}\n' ;;
-  *) printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n' ;;
+  *)
+    if [[ "$args" == *"/v1/models"* ]]; then
+      printf '{"data":[{"id":"speedy","object":"model"}]}\n'
+    else
+      printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n'
+    fi
+    ;;
 esac

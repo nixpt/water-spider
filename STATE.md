@@ -10,7 +10,7 @@ but works with any RunPod pod template.
 **Runtime:** pure Bash with `runpodctl`/`ssh`/`jq`/`pgrep`; `curl` is
 conditional for GraphQL-only creation flags and `bucket-bridge` can optionally
 provision supported missing tools.
-**Verification:** 29 deterministic command cases, Bash syntax checks, and
+**Verification:** 32 deterministic command cases, Bash syntax checks, and
 ShellCheck 0.10.0. See `docs/testing.md`.
 
 **Origin:** extracted from `jokersquad/bin/water-spider` via
@@ -94,6 +94,12 @@ pulls, GPU initialization/inference, tunneling, HTTP completion, teardown, and
 independent absence verification. `send`/`receive`, the `recipe serve` wrapper,
 GUI forwarding, and snapshot collection remain explicitly unproven on a live
 pod (WATERS-003).
+
+**Ephemeral agent path:** WATERS-020 adds a local Mayfly lifecycle and OpenCode
+harness over the v2 pod's tunneled llama.cpp API. The `llama-agent` recipe is
+loopback-only and enables the Jinja tool-call path. Configuration, preflight,
+and command construction are deterministic-test-covered; the opt-in model
+qualification fixture has not yet been run against a live model.
 
 **Release state:** the canonical GitHub remote is configured; `VERSION` and
 `v0.1.0` establish the project release line. The release workflow no-ops on an

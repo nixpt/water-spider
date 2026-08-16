@@ -61,6 +61,9 @@ prerequisites, authentication, Docker use, and the first safe lifecycle.
 Agents can also use the read-only [`water-spider-mcp`](docs/mcp.md) server.
 It provides a local control profile over stdio and an in-image node profile over
 loopback Streamable HTTP, designed to be reached through `water-spider tunnel`.
+For short-lived coding workers, the
+[Mayfly + OpenCode guide](docs/mayfly-opencode.md) connects a local harness to
+a tool-capable llama.cpp endpoint on the v2 image without exposing a pod port.
 
 See the [CLI reference](docs/cli-reference.md) for syntax, flags, environment
 variables, side effects, and examples for every command.
@@ -101,6 +104,7 @@ cache, and private-image behavior is covered in
 - [Common workflows and troubleshooting](docs/workflows.md)
 - [MCP server for local agents and tunneled pod tools](docs/mcp.md)
 - [v2 GPU, llama.cpp, and GUI applications](docs/v2-gpu-guide.md)
+- [Short-lived agents with Mayfly and OpenCode](docs/mayfly-opencode.md)
 - [Configuration, credentials, and local state](docs/configuration.md)
 - [Operations and live-validation status](docs/operations.md)
 - [Architecture](docs/architecture.md)

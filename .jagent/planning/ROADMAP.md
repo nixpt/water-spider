@@ -40,6 +40,8 @@ remain.
 - **M4 — MCP agent surface** — foundation complete
   - WATERS-016: read-only control/node profiles, stdio, and tunneled HTTP
   - WATERS-017: enforceable leases before create/teardown tools
+- **M5 — Ephemeral local agents** — integration foundation complete
+  - WATERS-020: Mayfly lifecycle + OpenCode harness + tunneled v2 llama.cpp
 
 ## Non-goals
 

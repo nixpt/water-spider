@@ -3,8 +3,8 @@
 ## Deterministic verification
 
 ```sh
-bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh
-shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh
+bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly
+shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly
 ./tests/run.sh
 ./tests/release.sh
 cargo fmt --manifest-path mcp/Cargo.toml --check
@@ -13,9 +13,10 @@ cargo clippy --manifest-path mcp/Cargo.toml --all-targets --locked -- -D warning
 git diff --check
 ```
 
-The suite currently runs 29 cases. It covers every CLI dispatch path plus API
+The suite currently runs 32 cases. It covers every CLI dispatch path plus API
 failure, malformed JSON, ambiguous SSH data, GraphQL escaping and validation,
-transport errors, idempotent replay, and failed teardown verification.
+transport errors, idempotent replay, failed teardown verification, and the
+Mayfly/OpenCode endpoint preflight. Live model qualification remains opt-in.
 
 The release test creates an isolated temporary Git repository. It proves that a
 commit tagged with the current `VERSION` is a no-op and that the first later fix
