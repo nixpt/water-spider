@@ -34,6 +34,8 @@ release script, and GitHub has no protection against deleting or force-pushing
 
 GitHub logs proved release runs were successful no-ops because no initial tag
 existed. Added `VERSION=0.1.0`, an exact-tag bootstrap guard, isolated release
-tests, full-script ShellCheck coverage pinned to 0.10.0, and the active
+tests, full-script ShellCheck coverage pinned to upstream tag `v0.10.0`, and the active
 `fleet-default-main-protection` ruleset. Documented `git-ops`, `gh-ruleset`,
-audit/sweep tools, and why `text-editor-core` is unrelated.
+audit/sweep tools, and why `text-editor-core` is unrelated. The first live CI
+run caught that the action input requires the leading `v`; the corrected pin
+matches the verified upstream release asset names.
