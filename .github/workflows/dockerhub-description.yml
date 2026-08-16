@@ -1,0 +1,25 @@
+name: Docker Hub description
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - docker/DOCKERHUB.md
+      - scripts/update-dockerhub-description.sh
+      - assets/banner-1280x425.png
+      - .github/workflows/dockerhub-description.yml
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Docker Hub repository description
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
+        run: scripts/update-dockerhub-description.sh
