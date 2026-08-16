@@ -7,6 +7,16 @@ The public Docker Hub landing page is maintained in
 the same variables and run `scripts/update-dockerhub-description.sh` from the
 repository root.
 
+The same three variants are published to GitHub Container Registry by every
+project release. GHCR authentication uses the workflow's scoped
+`GITHUB_TOKEN`; no registry password is stored in repository secrets.
+
+```sh
+docker pull ghcr.io/nixpt/water-spider:latest
+docker pull ghcr.io/nixpt/water-spider:pod
+docker pull ghcr.io/nixpt/water-spider:v2
+```
+
 Three separate images, three different jobs. None of them bundle `zorro`
 — it's a private repo and a separate concern; these images are about
 running water-spider (and, for `:v2`, llama.cpp) portably.
@@ -16,6 +26,10 @@ running water-spider (and, for `:v2`, llama.cpp) portably.
 | `:latest` / `:2.9.0` | `../Dockerfile` | `debian:bookworm-slim` | 179MB | One-shot CLI: `docker run --rm nixpt/water-spider create ...` |
 | `:pod` | `../Dockerfile.runpod` | `runpod/base:1.1.0-rc.154-ubuntu2204` | 2.81GB | CPU control pod — orchestrates *other* pods, no compute of its own |
 | `:v2` | `../Dockerfile.v2` | `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404` | 32.2GB | GPU control pod — llama.cpp (CUDA) + `hf` CLI, does its own inference |
+
+GHCR also retains immutable project-version tags: `:<version>`,
+`:pod-<version>`, and `:v2-<version>`. For example, release `0.4.0` publishes
+`:0.4.0`, `:pod-0.4.0`, and `:v2-0.4.0` alongside the moving tags above.
 
 All variants include `water-spider-mcp`. The one-shot `:latest` image can run
 it by overriding the entrypoint; the control images can serve the safe node

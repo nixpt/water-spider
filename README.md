@@ -69,7 +69,8 @@ variables, side effects, and examples for every command.
 
 - **Local shell:** put `bin/` on `PATH`; requires `runpodctl`, `ssh`, `jq`, and
   `pgrep`. GraphQL-only create options additionally require `curl`.
-- **Docker CLI:** run `nixpt/water-spider:latest` from your machine.
+- **Container CLI:** run `ghcr.io/nixpt/water-spider:latest` or
+  `nixpt/water-spider:latest` from your machine.
 - **CPU control pod:** use `nixpt/water-spider:pod` as a persistent orchestrator
   that manages other pods.
 - **GPU control pod:** use `nixpt/water-spider:v2` when the orchestrator also

@@ -21,6 +21,8 @@ image. It is not water-spider's semantic version.
 - infers major/minor/patch from conventional commit messages;
 - updates the version and optional changelog;
 - commits, tags, and pushes the result.
+- builds all three Docker variants and publishes moving plus immutable tags to
+  `ghcr.io/nixpt/water-spider`.
 
 The script intentionally does not invent the initial version. Bootstrap uses a
 manually chosen `VERSION` plus matching tag. An exact-tag guard prevents that
@@ -32,7 +34,9 @@ the script also creates a GitHub Release with generated notes.
 
 ## Image publication
 
-Project releases and container publication are separate surfaces. Image build
-and live-validation details belong in [`docker/README.md`](../docker/README.md).
-Do not reuse a dependency version as a project release merely because an image
-already carries that tag.
+The release workflow publishes GHCR images with `packages: write` and the
+repository-scoped `GITHUB_TOKEN`. Docker Hub publication and its landing-page
+automation remain separate. Image build, tag mapping, and live-validation
+details belong in [`docker/README.md`](../docker/README.md). Do not reuse a
+dependency version as a project release merely because an image already carries
+that tag.

@@ -39,7 +39,8 @@ dcp: DCP/1.0
   stdio or loopback-only Streamable HTTP transports.
 - `tests/`: command-level harness with PATH-injected external-command fakes.
 - `.jagent/planning/`: backlog, roadmap, execution rules, and ticket evidence.
-- `.github/workflows/`: ShellCheck/test CI and semantic-version release job.
+- `.github/workflows/`: ShellCheck/test CI, semantic-version release, and
+  release-coupled GHCR publication for all three image variants.
 - `docs/`: architecture, operations, testing, and release guides.
 - `docs/repository-operations.md`: release bootstrap, ruleset policy, git-ops,
   audits, and branch maintenance.
