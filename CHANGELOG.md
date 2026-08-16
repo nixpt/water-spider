@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-16
+
+- feat: publish release images to GHCR
+
+
+
 ## [0.3.0] - 2026-08-16
 
 - feat: add read-only MCP server
