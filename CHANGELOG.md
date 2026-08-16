@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-16
+
+- fix: use ShellCheck release tag in CI
+
+
+
 ## [0.1.0] - 2026-08-16
 
 - Initial standalone RunPod lifecycle CLI.
