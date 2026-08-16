@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${FAKE_RUNPOD_MODE:-ok}"
+args=" $* "
+
+if [ "$mode" = "api-fail" ]; then
+  printf '{"error":"simulated API failure"}\nusage noise\n' >&2
+  exit 1
+fi
+
+case "$args" in
+  *" pod create "*)
+    if [ "$mode" = "malformed" ]; then printf 'not-json\n'; else printf '{"id":"pod-new"}\n'; fi
+    ;;
+  *" pod list "*)
+    [ "$mode" = "list-fail" ] && exit 1
+    if [ "$mode" = "empty-list" ]; then
+      printf '[]\n'
+    else
+      printf '[{"id":"pod-1","name":"test-pod","desiredStatus":"RUNNING","costPerHr":0.2,"gpuTypeId":"NVIDIA RTX 4090","machine":{"gpuDisplayName":"NVIDIA RTX 4090"}},{"id":"pod-new","name":"new-pod","desiredStatus":"RUNNING"}]\n'
+    fi
+    ;;
+  *" pod get "*) printf '{"id":"pod-1","desiredStatus":"RUNNING"}\n' ;;
+  *" pod delete "*) printf '{"id":"pod-1","deleted":true}\n' ;;
+  *" ssh info "*)
+    if [ "$mode" = "ambiguous-ssh" ]; then printf '{"unexpected":true}\n'; else printf '{"host":"127.0.0.1","port":22022}\n'; fi
+    ;;
+  *" gpu list "*) printf '[{"gpuId":"NVIDIA RTX 4090","memoryInGb":24,"stockStatus":"High","available":true,"communityCloud":true}]\n' ;;
+  *" user "*) printf '{"clientBalance":10,"currentSpendPerHr":0.2,"spendLimit":100}\n' ;;
+  *) printf '{}\n' ;;
+esac

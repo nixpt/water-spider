@@ -16,3 +16,6 @@ jobs:
         uses: ludeeus/action-shellcheck@2.0.0
         with:
           scandir: '.'
+
+      - name: Command tests
+        run: ./tests/run.sh

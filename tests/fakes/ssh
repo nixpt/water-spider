@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case " $* " in
+  *"zorro-image.json"*) printf '{"base":"test-image"}\n' ;;
+  *"ZORRO_MODELS_DIR"*) printf '["test.gguf"]\n' ;;
+  *) printf 'FAKE_SSH_OK\n' ;;
+esac
