@@ -1,3 +1,4 @@
 # TODO
 
-Tracked by agent. One-line items; complex work goes in `.jagent/planning/tickets/`.
+Canonical work is tracked in `.jagent/planning/TASKS.md`; this file intentionally
+contains no second backlog. Complex work belongs in a numbered ticket.

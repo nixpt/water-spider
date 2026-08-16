@@ -179,6 +179,11 @@ time" test log for each).
 See `STATE.md` for current status and `.jagent/planning/ROADMAP.md` for
 the plan.
 
+## Documentation
+
+See [`docs/`](docs/README.md) for architecture, operations, testing, release
+process, Docker/image documentation, and project-state navigation.
+
 ## Contributing
 
 Contributions from humans and coding agents are welcome. Read

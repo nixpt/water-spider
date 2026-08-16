@@ -12,17 +12,21 @@
 
 ## Problem
 
-The source explicitly marks SSH-info parsing, send/receive, tunnels, recipes, GUI forwarding, and snapshots as not live-tested. Interface assumptions in these paths cannot all be established with mocks alone.
+The core create/SSH/tunnel/inference/teardown path now has recorded live
+evidence, including a real tunneled completion and independent absence check.
+Send/receive, the `recipe serve` wrapper, GUI forwarding, and snapshots still
+depend on interface assumptions that mocks alone cannot establish.
 
 ## Reproduction
 
 1. Run `rg -n 'NOT live-tested|not live-tested|unverified shape' bin/water-spider README.md`.
-2. Confirm the affected workflows have no recorded live validation evidence.
+2. Compare the remaining caveats with `STATE.md` and `docs/operations.md`.
 
 ## Success criteria
 
 - [ ] A capped, time-boxed validation plan states the image, GPU, maximum duration, and expected maximum cost before pod creation.
-- [ ] Direct SSH parsing, tunnel start/stop, one small send/receive round trip, recipe serving, and snapshot output are exercised and recorded.
+- [x] Direct SSH parsing and tunnel start/stop are exercised and recorded.
+- [ ] One small send/receive round trip, recipe serving, and snapshot output are exercised and recorded.
 - [ ] GUI forwarding is either verified or left explicitly unsupported with the exact blocker documented.
 - [ ] The pod is deleted and absence is independently verified at the end of the run.
 - [ ] Source caveats and README status are updated to reflect observed behavior.

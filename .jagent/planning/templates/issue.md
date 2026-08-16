@@ -14,5 +14,8 @@
 
 ## Environment
 
-- **Rust version:** {{rustc --version}}
+- **water-spider commit:** {{git rev-parse --short HEAD}}
+- **runpodctl version:** {{runpodctl version}}
+- **Shell:** {{bash --version}}
 - **OS:** {{linux / macOS / etc.}}
+- **Execution mode:** {{local CLI / Docker image / RunPod control pod}}

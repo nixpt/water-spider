@@ -1,6 +1,6 @@
 ---
-name: water-spider-repo
-purpose: 
+name: water-spider
+purpose: Cost-safe RunPod GPU lifecycle CLI and published control-pod image family
 dcp: DCP/1.0
 ---
 
@@ -18,11 +18,13 @@ dcp: DCP/1.0
   each ticket before changing code.
 - Do not use a live RunPod resource without an explicit cost cap and teardown
   deadline.
+- Never turn mocked behavior into a claim of live RunPod verification; keep the
+  evidence boundary explicit in `STATE.md` and `docs/operations.md`.
 
 ## Build / Test
 
-- Syntax: `bash -n bin/water-spider tests/run.sh tests/fakes/*`
-- Static analysis: `shellcheck bin/water-spider tests/run.sh tests/fakes/*`
+- Syntax: `bash -n bin/water-spider tests/run.sh tests/fakes/* docker/*.sh`
+- Static analysis: `shellcheck bin/water-spider tests/run.sh tests/fakes/* docker/*.sh`
 - Deterministic suite: `./tests/run.sh` (no network, credentials, pods, or real
   SSH/process operations)
 
@@ -33,6 +35,9 @@ dcp: DCP/1.0
 - `tests/`: command-level harness with PATH-injected external-command fakes.
 - `.jagent/planning/`: backlog, roadmap, execution rules, and ticket evidence.
 - `.github/workflows/`: ShellCheck/test CI and semantic-version release job.
+- `docs/`: architecture, operations, testing, and release guides.
+- `docker/` + `Dockerfile*`: one-shot CLI, CPU control pod, and CUDA/llama.cpp
+  GPU control pod; `docker/README.md` owns image-specific evidence.
 
 ## Memory
 

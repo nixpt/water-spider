@@ -12,18 +12,21 @@
 
 ## Problem
 
-The release workflow expects an existing `v*` tag and a version surface, but the repository has neither a `VERSION` file nor tags. The local checkout also has no Git remote, despite documentation naming `nixpt/water-spider` as the intended public origin.
+The canonical public remote is configured and current work has been pushed, but
+the release workflow still has neither a `VERSION` surface nor an initial `v*`
+tag from which to calculate subsequent releases.
 
 ## Reproduction
 
-1. Run `git remote -v` and `git tag --list`; both are empty in the current checkout.
-2. Run `test -f VERSION`; it fails.
-3. Run `BUMPVER_DRY_RUN=1 ./scripts/bump-version.sh`; it reports that no prior tag exists and performs no release.
+1. Run `git remote -v` and confirm `origin` is `nixpt/water-spider`.
+2. Run `git tag --list` and confirm there is no project tag.
+3. Run `test -f VERSION`; it fails.
+4. Run `BUMPVER_DRY_RUN=1 ./scripts/bump-version.sh`; it reports that no prior tag exists and performs no release.
 
 ## Success criteria
 
 - [ ] The repository has one documented version surface consumed by `bump-version.sh`.
-- [ ] The authorized canonical GitHub repository is created or confirmed and `origin` points to it.
+- [x] The authorized canonical GitHub repository is confirmed and `origin` points to it.
 - [ ] CI and branch protection pass before publication.
 - [ ] An initial semantic-version tag and GitHub release are published intentionally.
 - [ ] A subsequent dry run demonstrates that conventional commits select the expected next version.

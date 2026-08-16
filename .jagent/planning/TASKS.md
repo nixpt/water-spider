@@ -16,6 +16,7 @@ full details on each `WATERS-N` ID.
 
 - [ ] [WATERS-005](tickets/WATERS-005-release-bootstrap.md) — Bootstrap versioning, remote, and initial release
 - [x] [WATERS-007](tickets/WATERS-007-community-docs.md) — Add public repository and contribution conventions
+- [x] [WATERS-009](tickets/WATERS-009-docs-refresh.md) — Reconcile project documentation and navigation
 
 ## P2 — Project Metadata
 

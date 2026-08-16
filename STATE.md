@@ -7,9 +7,11 @@ independently of the fleet's internal `jokersquad`/`zorro` repos. Not
 zorro-specific — defaults to the `nixpt/zorro` image family via env vars,
 but works with any RunPod pod template.
 
-**Deps:** none (Rust-free — pure bash, `runpodctl`/`ssh`/`jq`/`pgrep` at
-runtime, `bucket-bridge` optional for JIT-provisioning a missing dep)
-**Build:** `shellcheck bin/water-spider`.
+**Runtime:** pure Bash with `runpodctl`/`ssh`/`jq`/`pgrep`; `curl` is
+conditional for GraphQL-only creation flags and `bucket-bridge` can optionally
+provision supported missing tools.
+**Verification:** 29 deterministic command cases, Bash syntax checks, and
+ShellCheck 0.10.0. See `docs/testing.md`.
 
 **Origin:** extracted from `jokersquad/bin/water-spider` via
 `foreman-scaffold --type shell`, 2026-08-16. Full history (feature
@@ -86,3 +88,14 @@ pod with `--registry-auth-id` set, confirmed via SSH it pulled the
 private image and `zorro --version` ran, then torn down.
 `$WATER_SPIDER_REGISTRY_AUTH_ID=cmsvny408000t1p6ujkm1o1uc` makes this the
 default for future `create` calls without passing the flag every time.
+
+**Remaining validation:** live evidence covers create, SSH, registry-authenticated
+pulls, GPU initialization/inference, tunneling, HTTP completion, teardown, and
+independent absence verification. `send`/`receive`, the `recipe serve` wrapper,
+GUI forwarding, and snapshot collection remain explicitly unproven on a live
+pod (WATERS-003).
+
+**Release state:** the canonical GitHub remote is configured and current work
+has been pushed. The project still has no `VERSION` or `v*` tag; Docker tag
+`2.9.0` is the bundled `runpodctl` version, not a water-spider release. See
+`docs/releasing.md` and WATERS-005.
