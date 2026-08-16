@@ -9,3 +9,15 @@
 .dejavue/embeddings.jsonl
 .dejavue/embedder_circuit.json
 .dejavue/timeline.jsonl.bak-*
+
+# .jagent: planning files are committed; runtime databases and connector
+# artifacts are local-only.
+.jagent/*.db
+.jagent/*.db-shm
+.jagent/*.db-wal
+.jagent/*.db-journal
+.jagent/*.lock
+.jagent/*.sock
+.jagent/cache/
+.jagent/mcp/
+.jagent/*.mcp.json

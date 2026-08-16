@@ -178,3 +178,18 @@ time" test log for each).
 
 See `STATE.md` for current status and `.jagent/planning/ROADMAP.md` for
 the plan.
+
+## Contributing
+
+Contributions from humans and coding agents are welcome. Read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) before starting, especially the rules for
+billable live tests, teardown verification, secrets, and ticket worktrees.
+
+## License
+
+water-spider is available under either of:
+
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
