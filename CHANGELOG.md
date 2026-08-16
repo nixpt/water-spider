@@ -7,6 +7,14 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-16
+
+- Merge pull request #1 from nixpt/ticket/waters-020-mayfly-opencode
+- fix: add Ampere llama agent support
+- feat: integrate mayfly opencode agents
+
+
+
 - feat: connect Mayfly and OpenCode to tunneled v2 llama.cpp inference
 - fix: compile v2 for Ampere GPUs and propagate failed agent-server launches
 
