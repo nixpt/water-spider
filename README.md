@@ -97,6 +97,11 @@ llama-server -m /workspace/scratch/models/<file.gguf> --port 8080 -ngl 999
 `llama-cli`, `llama-server`, `llama-quantize`, `llama-bench`, and
 `llama-gguf-split` are all on `PATH`.
 
+See [`docker/README.md`](docker/README.md) for the full breakdown of all
+three images (what's in each, why they're separate, the `docker/*.sh`
+helper scripts, live RunPod template ids, and the "verified at authoring
+time" test log for each).
+
 ## Subcommands
 
 - **`create`** — guards the historical flaky-create-makes-billed-dupes
