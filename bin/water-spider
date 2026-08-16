@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# RunPod GPU pod orchestration CLI — create/connect/tunnel/recipe/gui/snapshot, built on runpodctl + the RunPod GraphQL API
+set -euo pipefail
+
+usage() {
+    cat <<USAGE
+usage: water-spider <command> [args...]
+
+commands:
+  help          show this message
+USAGE
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    help|-h|--help) usage ;;
+    *)
+        echo "water-spider: unknown command: $cmd" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
