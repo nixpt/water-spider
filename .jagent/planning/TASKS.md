@@ -21,5 +21,6 @@ full details on each `WATERS-N` ID.
 
 ## P2 — Project Metadata
 
+- [x] [WATERS-011](tickets/WATERS-011-brand-assets.md) — Create the project logo and repository asset kit
 - [x] [WATERS-006](tickets/WATERS-006-planning-metadata.md) — Replace scaffold placeholders with accurate project metadata
 - [x] [WATERS-008](tickets/WATERS-008-dejavue-refresh.md) — Refresh vendored Dejavue fallback and audit skills

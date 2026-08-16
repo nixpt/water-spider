@@ -1,5 +1,9 @@
 # water-spider
 
+<p align="center">
+  <img src="assets/banner-1280x425.png" alt="Water Spider — GPU lifecycle orchestration" width="100%">
+</p>
+
 A thin RunPod GPU-pod-lifecycle CLI built on `runpodctl` (and the RunPod
 GraphQL API for the fields the CLI doesn't expose). Named for the
 lean-manufacturing "water spider" role: ferries supplies so a workstation
