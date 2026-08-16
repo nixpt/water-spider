@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-001 |
 | **Priority** | P0 |
-| **Status** | Backlog |
+| **Status** | Done |
 | **Phase** | Core health |
 | **Assignee** | unassigned |
 | **Dependencies** | none |
@@ -22,9 +22,9 @@ CI invokes ShellCheck, but the repository does not record a locally verified cle
 
 ## Success criteria
 
-- [ ] `shellcheck bin/water-spider` exits zero without blanket file-level suppression.
-- [ ] Any targeted suppression documents why the flagged construct is intentional.
-- [ ] CI uses a pinned ShellCheck action revision or version instead of a mutable branch.
+- [x] `shellcheck bin/water-spider` exits zero without blanket file-level suppression.
+- [x] Any targeted suppression documents why the flagged construct is intentional.
+- [x] CI uses a pinned ShellCheck action revision or version instead of a mutable branch.
 
 ## Technical approach
 
@@ -40,3 +40,7 @@ CI invokes ShellCheck, but the repository does not record a locally verified cle
 ## Non-goals
 
 - Rewriting the Bash CLI in another language.
+
+## Resolution
+
+Verified with ShellCheck 0.10.0. The invalid inline directive comment was split from its explanation, four ambiguous `A && B || die` checks were rewritten as explicit conditionals, and CI now pins `ludeeus/action-shellcheck@2.0.0`. `shellcheck bin/water-spider`, `bash -n bin/water-spider`, and the `--help` smoke check all exit zero.
