@@ -28,3 +28,14 @@ from the finished script, not a `git subtree split`.
 **Published RunPod Template:** `water-spider-control-pod-public`
 (id `d5q8gekgxt`, public, CPU category, image `nixpt/water-spider:pod`) —
 created via `docker/create-runpod-template.sh PUBLISH_PUBLIC=1`.
+
+**RunPod registry auth** (2026-08-16): `nixpt/zorro` was flipped private on
+Docker Hub (via the web UI — the API's own visibility PATCH silently
+no-ops, a platform quirk, not fixable from this side). Registered Docker
+Hub creds with RunPod so `water-spider create` can still pull it — live
+id `cmsvny408000t1p6ujkm1o1uc` (name `nixpt-dockerhub`, created via
+`docker/create-registry-auth.sh`). Live-tested end to end: created a real
+pod with `--registry-auth-id` set, confirmed via SSH it pulled the
+private image and `zorro --version` ran, then torn down.
+`$WATER_SPIDER_REGISTRY_AUTH_ID=cmsvny408000t1p6ujkm1o1uc` makes this the
+default for future `create` calls without passing the flag every time.

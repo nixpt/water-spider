@@ -73,10 +73,17 @@ so republishing means delete + recreate, not update).
   `--idempotency-key KEY` makes retries safe — a retried `create` with the
   same key replays the same pod instead of billing a second one (local
   ledger + `mkdir`-atomic lock). `--min-download`/`--min-upload`/
-  `--cuda-versions`/`--data-center`/`--country` reach GraphQL-only fields
-  `runpodctl`'s own CLI doesn't expose — a bandwidth floor and an
-  allowed-driver-version filter, both enforced at creation time instead of
-  discovered (and paid for) after the fact.
+  `--cuda-versions`/`--data-center`/`--country`/`--registry-auth-id` reach
+  GraphQL-only fields `runpodctl`'s own CLI doesn't expose at all (checked:
+  `runpodctl create pod --help`) — a bandwidth floor and an allowed-driver-
+  version filter enforced at creation time instead of discovered (and paid
+  for) after the fact, and a private-registry credential so `--image` can
+  point at a private repo. `--registry-auth-id` defaults from
+  `$WATER_SPIDER_REGISTRY_AUTH_ID` — see
+  [`docker/create-registry-auth.sh`](docker/create-registry-auth.sh) to
+  register a Docker Hub credential with RunPod and get an id. Live-tested
+  end to end: created a real pod against a private image with this set,
+  confirmed via SSH it actually pulled.
 - **`list`** / **`status`** (balance + live spend/hr) / **`get`**
 - **`connect`** — resolves SSH connection info and prints it, with a proxy
   fallback.
