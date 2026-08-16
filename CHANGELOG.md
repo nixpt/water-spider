@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-16
+
+- docs: add CLI and user guides
+
+
+
 ## [0.1.4] - 2026-08-16
 
 - test: follow current release version
