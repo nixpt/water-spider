@@ -7,5 +7,15 @@ full details on each `WATERS-N` ID.
 
 ## P0 — Build & Core Health
 
-- [ ] `shellcheck bin/water-spider` clean
-- [ ] Test scaffold in place (bats/shunit2, or a plain `tests/*.sh` smoke script)
+- [ ] [WATERS-001](tickets/WATERS-001-shellcheck-clean.md) — Make `shellcheck bin/water-spider` clean
+- [ ] [WATERS-002](tickets/WATERS-002-command-test-harness.md) — Add a mocked command-level test harness
+- [ ] [WATERS-003](tickets/WATERS-003-live-runpod-validation.md) — Validate unproven workflows against one controlled live pod
+- [ ] [WATERS-004](tickets/WATERS-004-graphql-path-hardening.md) — Harden GraphQL dependencies and input construction
+
+## P1 — Release Readiness
+
+- [ ] [WATERS-005](tickets/WATERS-005-release-bootstrap.md) — Bootstrap versioning, remote, and initial release
+
+## P2 — Project Metadata
+
+- [ ] [WATERS-006](tickets/WATERS-006-planning-metadata.md) — Replace scaffold placeholders with accurate project metadata
