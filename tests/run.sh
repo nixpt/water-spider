@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$ROOT/bin/water-spider"
+MAYFLY_BRIDGE="$ROOT/integrations/mayfly-opencode/water-spider-mayfly"
 TEST_TMP="$(mktemp -d)"
 trap 'rm -rf "$TEST_TMP"' EXIT
 
@@ -49,6 +50,10 @@ run_case "receive prints destination" 0 "cd results" "$CLI" receive pod-1 /tmp/o
 run_case "tunnel records endpoint" 0 "http://localhost:8080" "$CLI" tunnel pod-tunnel
 run_case "recipe list" 0 "Available recipes" "$CLI" recipe list
 run_case "recipe serve" 0 "ready: http://localhost:9090" "$CLI" recipe serve pod-recipe /models/test.gguf --engine llama --port 9090
+run_case "recipe serve for agents" 0 "engine=llama-agent" env FAKE_SSH_REQUIRE_AGENT=1 "$CLI" recipe serve pod-recipe /models/tool-model.gguf --engine llama-agent --port 9091
+run_case "recipe agent launch propagates failure" 1 "remote launch failed" env FAKE_SSH_AGENT_FAIL=1 "$CLI" recipe serve pod-recipe /models/tool-model.gguf --engine llama-agent --port 9091
+run_case "recipe rejects unknown engine" 1 "zorro|llama|llama-agent|pf" "$CLI" recipe serve pod-recipe /models/test.gguf --engine nope
+run_case "Mayfly OpenCode bridge checks endpoint" 0 "OpenAI-compatible model catalog reached" "$MAYFLY_BRIDGE" check
 run_case "gui x11" 0 "FAKE_SSH_OK" env DISPLAY=:0 "$CLI" gui pod-1 --x11 -- xterm
 run_case "snapshot" 0 "wrote $TEST_TMP/snapshot.json" "$CLI" snapshot pod-1 -o "$TEST_TMP/snapshot.json"
 run_case "teardown verifies deletion" 0 "confirmed gone" run_with_input_mode y empty-list "$CLI" teardown pod-1

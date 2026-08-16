@@ -40,8 +40,8 @@ their claims are affected.
 Before submitting:
 
 ```sh
-bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh
-shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/fakes/* docker/*.sh
+bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly
+shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/fakes/* docker/*.sh integrations/mayfly-opencode/water-spider-mayfly
 ./tests/run.sh
 ./tests/release.sh
 git diff --check

@@ -128,11 +128,21 @@ water-spider recipe serve POD-ID \
   --engine llama --port 8080
 ```
 
+For an OpenAI-compatible endpoint configured for local coding agents, use
+`--engine llama-agent`. It binds to pod loopback and enables llama.cpp's Jinja
+tool-call path. Follow the [Mayfly + OpenCode guide](mayfly-opencode.md); the
+selected GGUF must include a compatible tool-use chat template.
+
 Confirm actual GPU use instead of assuming offload succeeded:
 
 ```sh
 nvidia-smi
 ```
+
+Release v0.4.1 omitted CUDA architecture 8.6, so its published image cannot run
+llama.cpp on Ampere RTX A4000/3090 GPUs. The corrected image build includes
+`86;89;90;120`; do not claim the Ampere path is fixed until a release containing
+that build is published and live-tested.
 
 The other installed llama.cpp tools support direct inference, benchmarking,
 quantization, and GGUF splitting:

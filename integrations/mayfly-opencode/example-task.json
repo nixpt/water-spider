@@ -1,0 +1,18 @@
+{
+  "task": "Fix the failing test in tests/example.sh. Stay within the paths_allow list.",
+  "done_when": {
+    "type": "command",
+    "run": "./tests/example.sh",
+    "expect_exit": 0
+  },
+  "harness": "opencode",
+  "cwd": ".",
+  "ttl": "15m",
+  "constraints": {
+    "paths_allow": [
+      "src/",
+      "tests/"
+    ],
+    "no_spawn": true
+  }
+}

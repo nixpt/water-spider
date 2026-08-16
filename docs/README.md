@@ -17,6 +17,8 @@ path. Start with the user guides, then use the maintainer references as needed.
   loopback server reached through an SSH tunnel.
 - [`v2-gpu-guide.md`](v2-gpu-guide.md) — deploy the GPU image, initialize and
   verify CUDA, download GGUF models, serve llama.cpp, and forward GUI apps.
+- [`mayfly-opencode.md`](mayfly-opencode.md) — connect short-lived local Mayfly
+  workers and OpenCode to tunneled, tool-capable llama.cpp inference.
 
 ## Maintainer and operational references
 

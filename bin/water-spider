@@ -52,7 +52,7 @@
 #   water-spider tunnel <pod-id> [--port LOCAL:REMOTE ...] [--stop]
 #                        # default ports: 8080 (zorro serve), 11450 (pf serve)
 #   water-spider recipe list
-#   water-spider recipe serve <pod-id> <model-path> [--engine zorro|llama|pf]
+#   water-spider recipe serve <pod-id> <model-path> [--engine zorro|llama|llama-agent|pf]
 #                        [--port N]        # launch + auto-tunnel + print local URL
 #   water-spider gui <pod-id> [--x11|--trusted] [--display N] [--] <command...>
 #                        # a GUI app launched on the pod renders as a window
@@ -603,11 +603,14 @@ cmd_recipe() {
     list)
       cat <<'EOF'
 Available recipes:
-  serve <pod-id> <model-path> [--engine zorro|llama|pf] [--port N]
+  serve <pod-id> <model-path> [--engine zorro|llama|llama-agent|pf] [--port N]
       Launch a model server on the pod (background, nohup, logged to
       ~/serve.log on the pod) and auto-tunnel its port to localhost.
       --engine zorro (default): `zorro serve <model> --port N`
       --engine llama:           `llama-server -m <model> --port N -ngl 99`
+      --engine llama-agent:     llama.cpp's OpenAI-compatible API on pod
+                                loopback, with tool calling enabled for a
+                                tunneled local coding harness
       --engine pf:               `pf serve` (pf's own config picks the model —
                                   point pf's model registry at <model-path>
                                   first; this recipe does not do that for you)
@@ -636,8 +639,9 @@ EOF
       case "$engine" in
         zorro) remote_cmd="nohup zorro serve '$model' --port $port > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
         llama) remote_cmd="nohup llama-server -m '$model' --port $port -ngl 99 > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
+        llama-agent) remote_cmd="nohup llama-server -m '$model' --host 127.0.0.1 --port $port -ngl 999 --jinja --flash-attn auto --alias speedy > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || { echo FAILED; tail -20 ~/serve.log; exit 1; }" ;;
         pf)    remote_cmd="nohup pf serve > ~/serve.log 2>&1 & disown; sleep 2; ss -ltn | grep ':$port ' && echo LAUNCHED || (echo FAILED; tail -20 ~/serve.log)" ;;
-        *) die "recipe serve: unknown --engine '$engine' (zorro|llama|pf)" ;;
+        *) die "recipe serve: unknown --engine '$engine' (zorro|llama|llama-agent|pf)" ;;
       esac
       echo "==> launching $engine serve on the pod (backgrounded, logged to ~/serve.log there)"
       echo "    NOT live-tested this session — verify the remote_cmd shape on first real use."

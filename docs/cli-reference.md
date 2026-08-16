@@ -73,11 +73,14 @@ pod is stopped.
 
 ```sh
 water-spider recipe list
-water-spider recipe serve POD-ID MODEL-PATH [--engine zorro|llama|pf] [--port N]
+water-spider recipe serve POD-ID MODEL-PATH [--engine zorro|llama|llama-agent|pf] [--port N]
 ```
 
 `recipe serve` launches the selected pod-side model server, creates a local
 tunnel, and prints the local URL. Engine availability depends on the pod image.
+`llama-agent` binds the v2 image's llama.cpp server to pod loopback and enables
+its OpenAI-compatible tool-calling path for a tunneled local harness. See
+[Mayfly and OpenCode](mayfly-opencode.md).
 
 ### `gui`
 
