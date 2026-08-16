@@ -21,6 +21,14 @@
 # Deploy: docker/create-runpod-template.sh (same script as v1's control pod,
 # point IMAGE/TAG/CATEGORY at this image — see its own header).
 
+FROM rust:1.96-alpine AS water-spider-mcp-builder
+
+RUN apk add --no-cache musl-dev
+WORKDIR /build/mcp
+COPY mcp/Cargo.toml mcp/Cargo.lock ./
+COPY mcp/src ./src
+RUN cargo build --locked --release
+
 FROM runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404
 
 ARG RUNPODCTL_VERSION=2.9.0
@@ -105,6 +113,7 @@ RUN install -m755 -t /usr/local/bin \
     && rm -rf /opt/llama.cpp/build /opt/llama.cpp/.git
 
 COPY bin/water-spider /usr/local/bin/water-spider
+COPY --from=water-spider-mcp-builder /build/mcp/target/release/water-spider-mcp /usr/local/bin/water-spider-mcp
 RUN chmod +x /usr/local/bin/water-spider
 
 # Same self-heal hook zorro's v3 image and water-spider v1's control pod use

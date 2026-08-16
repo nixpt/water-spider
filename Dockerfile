@@ -23,6 +23,14 @@
 #   -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix
 # Build with --build-arg INCLUDE_XPRA=1 to bake xpra in instead.
 
+FROM rust:1.96-alpine AS water-spider-mcp-builder
+
+RUN apk add --no-cache musl-dev
+WORKDIR /build/mcp
+COPY mcp/Cargo.toml mcp/Cargo.lock ./
+COPY mcp/src ./src
+RUN cargo build --locked --release
+
 FROM debian:bookworm-slim
 
 # Pinned to a specific runpodctl release + verified sha256 (checksums file
@@ -51,6 +59,7 @@ RUN curl -fsSL -o /usr/local/bin/runpodctl \
     && chmod +x /usr/local/bin/runpodctl
 
 COPY bin/water-spider /usr/local/bin/water-spider
+COPY --from=water-spider-mcp-builder /build/mcp/target/release/water-spider-mcp /usr/local/bin/water-spider-mcp
 RUN chmod +x /usr/local/bin/water-spider
 
 # scaffold subcommand needs a sibling jokersquad checkout — not present in

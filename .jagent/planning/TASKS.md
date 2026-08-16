@@ -15,6 +15,8 @@ full details on each `WATERS-N` ID.
 
 ## P1 — Release Readiness
 
+- [x] [WATERS-016](tickets/WATERS-016-mcp-readonly.md) — Add read-only control and node MCP profiles
+- [ ] [WATERS-017](tickets/WATERS-017-mcp-billable-leases.md) — Add enforceable MCP leases before billable lifecycle tools
 - [x] [WATERS-013](tickets/WATERS-013-release-test-current-version.md) — Make release tests follow the current project version
 - [x] [WATERS-005](tickets/WATERS-005-release-bootstrap.md) — Bootstrap versioning, remote, and initial release
 - [x] [WATERS-007](tickets/WATERS-007-community-docs.md) — Add public repository and contribution conventions

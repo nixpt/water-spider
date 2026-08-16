@@ -17,6 +17,17 @@ running water-spider (and, for `:v2`, llama.cpp) portably.
 | `:pod` | `../Dockerfile.runpod` | `runpod/base:1.1.0-rc.154-ubuntu2204` | 2.81GB | CPU control pod — orchestrates *other* pods, no compute of its own |
 | `:v2` | `../Dockerfile.v2` | `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404` | 32.2GB | GPU control pod — llama.cpp (CUDA) + `hf` CLI, does its own inference |
 
+All variants include `water-spider-mcp`. The one-shot `:latest` image can run
+it by overriding the entrypoint; the control images can serve the safe node
+profile on pod loopback when `WATER_SPIDER_MCP_ENABLE=1`. See
+[`../docs/mcp.md`](../docs/mcp.md) for client configuration and SSH tunneling.
+
+```sh
+docker run --rm -i --entrypoint water-spider-mcp \
+  -v "$HOME/.runpod:/root/.runpod:ro" \
+  nixpt/water-spider --profile control --transport stdio
+```
+
 ## Build
 
 ```sh

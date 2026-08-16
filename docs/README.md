@@ -13,6 +13,8 @@ path. Start with the user guides, then use the maintainer references as needed.
   private registries, cache directories, and snapshot state.
 - [`workflows.md`](workflows.md) — task-oriented examples and recovery steps for
   ambiguous creation, SSH, tunnels, and teardown.
+- [`mcp.md`](mcp.md) — agent tool profiles, stdio use, and the in-image
+  loopback server reached through an SSH tunnel.
 
 ## Maintainer and operational references
 

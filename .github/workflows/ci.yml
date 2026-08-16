@@ -23,3 +23,12 @@ jobs:
 
       - name: Release bootstrap tests
         run: ./tests/release.sh
+
+      - name: MCP format
+        run: cargo fmt --manifest-path mcp/Cargo.toml --check
+
+      - name: MCP tests
+        run: cargo test --manifest-path mcp/Cargo.toml --locked
+
+      - name: MCP lint
+        run: cargo clippy --manifest-path mcp/Cargo.toml --all-targets --locked -- -D warnings

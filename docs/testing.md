@@ -7,6 +7,9 @@ bash -n bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh t
 shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh
 ./tests/run.sh
 ./tests/release.sh
+cargo fmt --manifest-path mcp/Cargo.toml --check
+cargo test --manifest-path mcp/Cargo.toml --locked
+cargo clippy --manifest-path mcp/Cargo.toml --all-targets --locked -- -D warnings
 git diff --check
 ```
 
@@ -23,10 +26,16 @@ optional scaffold command are placed first on `PATH`. Tests isolate `HOME` and
 `XDG_CACHE_HOME` under a temporary directory. They must not contact RunPod,
 open SSH connections, kill real processes, or read developer credentials.
 
+The MCP suite starts real stdio and Streamable HTTP clients against the server,
+checks profile-specific tool discovery, and calls the control adapter through a
+fake `water-spider` executable. If the host sandbox prohibits loopback binds,
+only the HTTP transport case is skipped; CI runs the complete protocol suite.
+
 ## CI
 
-`.github/workflows/ci.yml` runs ShellCheck 0.10.0 and the command suite on every
-push and pull request. Upgrade local and CI versions together.
+`.github/workflows/ci.yml` runs ShellCheck 0.10.0, the command suite, and Rust
+format/test/clippy checks on every push and pull request. Upgrade pinned tools
+and local expectations together.
 
 ## Live verification
 

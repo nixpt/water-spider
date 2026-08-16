@@ -1,0 +1,27 @@
+[package]
+name = "water-spider-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Cost-safe MCP tools for water-spider control and GPU pod inspection"
+
+[[bin]]
+name = "water-spider-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+rmcp = { version = "1.8", features = ["server", "transport-io", "transport-streamable-http-server"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+rmcp = { version = "1.8", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+tempfile = "3"

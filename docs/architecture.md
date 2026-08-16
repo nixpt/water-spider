@@ -14,12 +14,20 @@ bin/water-spider
   |-- RunPod GraphQL --- creation fields absent from runpodctl
   |-- ssh -------------- commands, GUI forwarding, and local tunnels
   `-- local state ------ idempotency ledgers and tracked tunnel PIDs
+
+local agent -- stdio --> water-spider-mcp (control) -- fixed argv --> bin/water-spider
+local agent -- SSH tunnel --> 127.0.0.1:8765 -- water-spider-mcp (node)
 ```
 
 The normal creation path stays on `runpodctl`. GraphQL is selected only for
 bandwidth, CUDA, location, or private-registry constraints that `runpodctl`
 does not expose. GraphQL strings are encoded through `jq`, constrained values
 are validated before the request, and `curl` is required only on that path.
+
+The MCP control profile is a typed, read-only adapter over a fixed CLI subset;
+it never accepts shell text. The node profile has a separate tool catalog for
+image, GPU, disk, and model inspection. Its Streamable HTTP listener accepts
+loopback addresses only and is intended to be reached through an SSH tunnel.
 
 ## Local state
 
@@ -43,6 +51,7 @@ are validated before the request, and `curl` is required only on that path.
 ## Repository map
 
 - `bin/water-spider` — all CLI behavior and dispatch.
+- `mcp/` — native MCP server, typed tools, and protocol-level tests.
 - `tests/` — command-level harness and PATH-injected fakes.
 - `docker/` and `Dockerfile*` — one-shot, CPU-control, and GPU-control images.
 - `.github/workflows/` — static analysis/tests and release automation.

@@ -69,3 +69,20 @@ fi
 log "done — direct SSH should now work: ssh root@<pod-ip> -p <mapped-22-port>"
 log "water-spider is on PATH — use this pod as a persistent 'control pod' to manage" \
     "other RunPod pods without keeping a laptop open (create/tunnel/recipe/teardown, etc)"
+
+# --- 4. Optional MCP service: loopback-only by construction. The server rejects
+#        non-loopback listeners itself; SSH forwarding is the intended access path.
+#        Node is the safe default because it receives no RunPod lifecycle authority.
+if [[ "${WATER_SPIDER_MCP_ENABLE:-0}" == "1" ]]; then
+    mcp_profile="${WATER_SPIDER_MCP_PROFILE:-node}"
+    mcp_listen="${WATER_SPIDER_MCP_LISTEN:-127.0.0.1:8765}"
+    mcp_pid_file="/run/water-spider-mcp.pid"
+    if [[ -r "$mcp_pid_file" ]] && kill -0 "$(<"$mcp_pid_file")" 2>/dev/null; then
+        log "water-spider MCP already running (pid $(<"$mcp_pid_file"))"
+    else
+        nohup water-spider-mcp --profile "$mcp_profile" --transport http \
+            --listen "$mcp_listen" >/var/log/water-spider-mcp.log 2>&1 &
+        echo "$!" > "$mcp_pid_file"
+        log "started water-spider MCP profile=$mcp_profile at http://$mcp_listen/mcp"
+    fi
+fi

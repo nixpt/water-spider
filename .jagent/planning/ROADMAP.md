@@ -35,6 +35,9 @@ remain.
   - WATERS-007: public contribution, license, and changelog conventions
   - WATERS-008: canonical Dejavue fallback and skills
   - WATERS-009: complete documentation reconciliation and navigation
+- **M4 — MCP agent surface** — foundation complete
+  - WATERS-016: read-only control/node profiles, stdio, and tunneled HTTP
+  - WATERS-017: enforceable leases before create/teardown tools
 
 ## Non-goals
 

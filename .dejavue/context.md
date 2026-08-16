@@ -27,11 +27,16 @@ dcp: DCP/1.0
 - Static analysis: `shellcheck bin/water-spider scripts/bump-version.sh tests/run.sh tests/release.sh tests/fakes/* docker/*.sh`
 - Deterministic suite: `./tests/run.sh` (no network, credentials, pods, or real
   SSH/process operations)
+- MCP: `cargo fmt --manifest-path mcp/Cargo.toml --check`,
+  `cargo test --manifest-path mcp/Cargo.toml --locked`, and
+  `cargo clippy --manifest-path mcp/Cargo.toml --all-targets --locked -- -D warnings`
 
 ## Architecture Map
 
 - `bin/water-spider`: transport-agnostic Bash CLI; all product behavior lives
   here and delegates to `runpodctl`, SSH, or conditional GraphQL via curl.
+- `mcp/`: typed Rust MCP adapter with separate control/node tool catalogs and
+  stdio or loopback-only Streamable HTTP transports.
 - `tests/`: command-level harness with PATH-injected external-command fakes.
 - `.jagent/planning/`: backlog, roadmap, execution rules, and ticket evidence.
 - `.github/workflows/`: ShellCheck/test CI and semantic-version release job.

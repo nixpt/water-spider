@@ -58,6 +58,10 @@ prerequisites, authentication, Docker use, and the first safe lifecycle.
 | Run inference | `recipe list`, `recipe serve` |
 | Fleet integration | `scaffold` (optional and nixpt-internal) |
 
+Agents can also use the read-only [`water-spider-mcp`](docs/mcp.md) server.
+It provides a local control profile over stdio and an in-image node profile over
+loopback Streamable HTTP, designed to be reached through `water-spider tunnel`.
+
 See the [CLI reference](docs/cli-reference.md) for syntax, flags, environment
 variables, side effects, and examples for every command.
 
@@ -92,6 +96,7 @@ cache, and private-image behavior is covered in
 - [Getting started](docs/getting-started.md)
 - [CLI reference](docs/cli-reference.md)
 - [Common workflows and troubleshooting](docs/workflows.md)
+- [MCP server for local agents and tunneled pod tools](docs/mcp.md)
 - [Configuration, credentials, and local state](docs/configuration.md)
 - [Operations and live-validation status](docs/operations.md)
 - [Architecture](docs/architecture.md)
