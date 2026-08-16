@@ -66,6 +66,37 @@ RunPod console, or deploy straight from
 PATCH once public — a platform quirk documented in that script's header —
 so republishing means delete + recreate, not update).
 
+### Or: a GPU control pod with llama.cpp (v2)
+
+The `:pod` variant above is deliberately CPU-only — it only orchestrates
+*other* pods, no compute of its own. [`Dockerfile.v2`](Dockerfile.v2)
+(published as `nixpt/water-spider:v2`) adds real GPU inference directly
+on the control pod itself: [llama.cpp](https://github.com/ggml-org/llama.cpp)
+built from source with CUDA (no Linux CUDA prebuilt release exists —
+checked directly against upstream's own release assets, Windows-only) +
+the `hf` CLI for pulling GGUF models straight from Hugging Face. Same
+`runpod/pytorch` CUDA base and self-healing SSH setup as `nixpt/zorro`'s
+own image. `zorro` itself is **not** in this image — it stays private;
+this is llama.cpp, a fully separate, general-purpose inference engine.
+
+```sh
+docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
+  --build-arg CUDA_ARCHS="89;90;120" .   # Ada/Hopper/Blackwell; narrow for a faster build
+```
+
+After SSH-ing into a v2 pod, run `water-spider-pod-init` first (GPU
+clock-lock + verify, same reproducible-benchmark discipline zorro's own
+`zorro-pod-init` uses — generic GPU-ops knowledge, not zorro-specific
+code). Then:
+
+```sh
+hf download <repo> <file.gguf> --local-dir /workspace/scratch/models
+llama-server -m /workspace/scratch/models/<file.gguf> --port 8080 -ngl 999
+```
+
+`llama-cli`, `llama-server`, `llama-quantize`, `llama-bench`, and
+`llama-gguf-split` are all on `PATH`.
+
 ## Subcommands
 
 - **`create`** — guards the historical flaky-create-makes-billed-dupes

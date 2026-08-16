@@ -21,9 +21,31 @@ from the finished script, not a `git subtree split`.
 
 **Published images (Docker Hub, `nixpt/water-spider`):**
 - `:2.9.0` / `:latest` — lightweight one-shot CLI (179MB, `Dockerfile`)
-- `:pod` — RunPod "control pod" variant, persistent SSH-reachable container
-  with water-spider on PATH (2.81GB, `Dockerfile.runpod`, base
+- `:pod` — CPU-only RunPod "control pod" variant, persistent SSH-reachable
+  container with water-spider on PATH (2.81GB, `Dockerfile.runpod`, base
   `runpod/base:1.1.0-rc.154-ubuntu2204`)
+- `:v2` — GPU control pod (2026-08-16): adds real inference capability —
+  llama.cpp (`ggml-org/llama.cpp` b10451, built from source with CUDA;
+  no Linux CUDA prebuilt exists upstream, checked directly) + `hf` CLI for
+  pulling GGUF models. Base `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404`
+  (same as `nixpt/zorro`'s own image — proven SSH self-heal). `zorro`
+  itself is NOT in this image (stays private) — llama.cpp is a fully
+  separate, general-purpose engine. 32.2GB, `CUDA_ARCHS="89;90;120"`
+  (Ada/Hopper/Blackwell). Real bug found+fixed during the build: llama.cpp's
+  CMake links `CUDA::cuda_driver` (an absolute-path `find_library` lookup,
+  not a bare `-l` flag) for its VMM allocator path — no real `libcuda.so.1`
+  exists at Docker BUILD time (only once a GPU is attached at `docker run`),
+  so this always fails to resolve regardless of `-L` search-path flags;
+  fixed via llama.cpp's own documented `-DGGML_CUDA_NO_VMM=ON` escape
+  hatch rather than fighting CMake's driver detection. Second bug: an
+  earlier version installed only the tool binaries and deleted `build/`,
+  breaking all of them (`libllama-cli-impl.so: cannot open shared object
+  file`) since llama.cpp also produces shared libs the binaries dynamically
+  link — fixed by installing `*.so*` to `/usr/local/lib` + `ldconfig`
+  before cleanup, in a separate `RUN` so an install-only fix doesn't force
+  a full recompile. `docker/water-spider-pod-init.sh` — GPU clock-lock +
+  verify, ported from `zorro-pod-init.sh` (generic GPU-ops knowledge, not
+  zorro-specific code).
 
 **Published RunPod Template:** `water-spider-control-pod-public`
 (id `d5q8gekgxt`, public, CPU category, image `nixpt/water-spider:pod`) —

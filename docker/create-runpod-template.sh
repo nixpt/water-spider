@@ -4,9 +4,13 @@
 # not GraphQL — introspection is disabled server-side so the schema can't be
 # verified before use; REST returns templates in their true shape).
 #
-# This deploys the "control pod" variant (Dockerfile.runpod), NOT the
-# lightweight one-shot CLI image (Dockerfile) — that one's ENTRYPOINT exits
-# as soon as a subcommand finishes, which is the wrong shape for a Pod.
+# This deploys a "control pod" variant (Dockerfile.runpod = CPU-only,
+# Dockerfile.v2 = GPU + llama.cpp), NOT the lightweight one-shot CLI image
+# (Dockerfile) — that one's ENTRYPOINT exits as soon as a subcommand
+# finishes, which is the wrong shape for a Pod. Set TAG/CATEGORY/README/
+# CONTAINER_DISK_GB/PORTS to switch which variant this publishes — see the
+# v2 example in docker/README or the repo README's "RunPod control pod"
+# section.
 #
 # PUBLISH_PUBLIC=1 sets isPublic:true — MUST be set at create time, not via a
 # later PATCH: live-tested (2026-08-16) and confirmed a RunPod platform bug —
@@ -29,25 +33,22 @@ PORTS="${PORTS:-22/tcp}"                         # SSH only — water-spider has
                                                   # THIS pod's own SSH session instead
 PUBLISH_PUBLIC="${PUBLISH_PUBLIC:-0}"            # 1 = visible in RunPod's public template
                                                   # gallery to any RunPod user, not just you
+CATEGORY="${CATEGORY:-CPU}"                      # CPU | NVIDIA | AMD (RunPod's own categories)
+README="${README:-water-spider control pod — a small always-on CPU pod with water-spider (RunPod GPU-pod orchestration CLI) preinstalled on PATH. SSH in and run \`water-spider create/tunnel/recipe/teardown ...\` to manage your OTHER RunPod pods without keeping a laptop open. Not a GPU/inference image — see github.com/nixpt/water-spider for the CLI itself and the lightweight one-shot Docker image (nixpt/water-spider:latest) for local use instead.}"
 
 API_KEY="$(secure-env get RUNPOD_API_KEY)"
 [ -n "$API_KEY" ] || { echo "no RUNPOD_API_KEY in vault" >&2; exit 1; }
 
 BODY=$(python3 -c '
 import json,sys
-img,name,disk,ports,is_public = sys.argv[1:6]
+img,name,disk,ports,is_public,category,readme = sys.argv[1:8]
 print(json.dumps({
-  "name": name, "imageName": img, "category": "CPU",
+  "name": name, "imageName": img, "category": category,
   "containerDiskInGb": int(disk),
   "ports": [p for p in ports.split(",") if p],
   "isPublic": is_public == "1",
-  "readme": "water-spider control pod — a small always-on CPU pod with water-spider "
-            "(RunPod GPU-pod orchestration CLI) preinstalled on PATH. SSH in and run "
-            "`water-spider create/tunnel/recipe/teardown ...` to manage your OTHER "
-            "RunPod pods without keeping a laptop open. Not a GPU/inference image — "
-            "see github.com/nixpt/water-spider for the CLI itself and the lightweight "
-            "one-shot Docker image (nixpt/water-spider:latest) for local use instead.",
-}))' "$IMAGE:$TAG" "$NAME" "$CONTAINER_DISK_GB" "$PORTS" "$PUBLISH_PUBLIC")
+  "readme": readme,
+}))' "$IMAGE:$TAG" "$NAME" "$CONTAINER_DISK_GB" "$PORTS" "$PUBLISH_PUBLIC" "$CATEGORY" "$README")
 
 echo "==> creating template '$NAME' (public: $PUBLISH_PUBLIC)"
 RESP=$(curl -sS -X POST "https://rest.runpod.io/v1/templates" \
