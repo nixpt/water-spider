@@ -36,6 +36,84 @@ Run the deterministic command suite without RunPod credentials or network access
 The suite places controlled fakes for external commands first on `PATH`; it does
 not create pods, open SSH connections, or terminate real processes.
 
+### Or: Docker
+
+A separate, lightweight image ships the CLI itself — no CUDA, no model
+weights, distinct from the `nixpt/zorro` inference image. Published on
+Docker Hub as [`nixpt/water-spider`](https://hub.docker.com/r/nixpt/water-spider).
+~179MB: base + `runpodctl` (pinned release, sha256-verified at build time)
++ `jq` + `openssh-client` + a handful of small CLI deps.
+
+```sh
+docker pull nixpt/water-spider          # or: docker build -t nixpt/water-spider .
+docker run --rm -it \
+  -v "$HOME/.runpod:/root/.runpod:ro" \
+  -v "$HOME/.ssh:/root/.ssh:ro" \
+  -p 8080:8080 \
+  nixpt/water-spider gpus --available
+```
+
+`gui`'s `xpra` path isn't baked in by default (keeps the image small — the
+script already falls back to raw `ssh -X`/`-Y`); build with
+`--build-arg INCLUDE_XPRA=1` to include it. See the `Dockerfile` header
+for the full run-flag rundown (mounting the X socket for local X11
+forwarding, etc).
+
+### Or: a RunPod "control pod"
+
+Both options above run water-spider on YOUR machine. For a persistent
+orchestrator that lives in RunPod's own network instead — so pods you
+manage stay reachable without a laptop left open — there's a separate
+[`Dockerfile.runpod`](Dockerfile.runpod) variant (published as
+`nixpt/water-spider:pod`) built on RunPod's own base image (same
+self-healing SSH setup validated for `nixpt/zorro`'s image), with
+water-spider preinstalled on `PATH` instead of as the `ENTRYPOINT` — the
+container stays alive as a normal SSH-reachable pod; you `ssh` in and run
+`water-spider ...` by hand to manage your *other* pods.
+
+Published as a public RunPod Template — search "water-spider" in the
+RunPod console, or deploy straight from
+[`docker/create-runpod-template.sh`](docker/create-runpod-template.sh)
+(`PUBLISH_PUBLIC=1` to republish; RunPod templates can't be edited via
+PATCH once public — a platform quirk documented in that script's header —
+so republishing means delete + recreate, not update).
+
+### Or: a GPU control pod with llama.cpp (v2)
+
+The `:pod` variant above is deliberately CPU-only — it only orchestrates
+*other* pods, no compute of its own. [`Dockerfile.v2`](Dockerfile.v2)
+(published as `nixpt/water-spider:v2`) adds real GPU inference directly
+on the control pod itself: [llama.cpp](https://github.com/ggml-org/llama.cpp)
+built from source with CUDA (no Linux CUDA prebuilt release exists —
+checked directly against upstream's own release assets, Windows-only) +
+the `hf` CLI for pulling GGUF models straight from Hugging Face. Same
+`runpod/pytorch` CUDA base and self-healing SSH setup as `nixpt/zorro`'s
+own image. `zorro` itself is **not** in this image — it stays private;
+this is llama.cpp, a fully separate, general-purpose inference engine.
+
+```sh
+docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
+  --build-arg CUDA_ARCHS="89;90;120" .   # Ada/Hopper/Blackwell; narrow for a faster build
+```
+
+After SSH-ing into a v2 pod, run `water-spider-pod-init` first (GPU
+clock-lock + verify, same reproducible-benchmark discipline zorro's own
+`zorro-pod-init` uses — generic GPU-ops knowledge, not zorro-specific
+code). Then:
+
+```sh
+hf download <repo> <file.gguf> --local-dir /workspace/scratch/models
+llama-server -m /workspace/scratch/models/<file.gguf> --port 8080 -ngl 999
+```
+
+`llama-cli`, `llama-server`, `llama-quantize`, `llama-bench`, and
+`llama-gguf-split` are all on `PATH`.
+
+See [`docker/README.md`](docker/README.md) for the full breakdown of all
+three images (what's in each, why they're separate, the `docker/*.sh`
+helper scripts, live RunPod template ids, and the "verified at authoring
+time" test log for each).
+
 ## Subcommands
 
 - **`create`** — guards the historical flaky-create-makes-billed-dupes
@@ -43,10 +121,17 @@ not create pods, open SSH connections, or terminate real processes.
   `--idempotency-key KEY` makes retries safe — a retried `create` with the
   same key replays the same pod instead of billing a second one (local
   ledger + `mkdir`-atomic lock). `--min-download`/`--min-upload`/
-  `--cuda-versions`/`--data-center`/`--country` reach GraphQL-only fields
-  `runpodctl`'s own CLI doesn't expose — a bandwidth floor and an
-  allowed-driver-version filter, both enforced at creation time instead of
-  discovered (and paid for) after the fact.
+  `--cuda-versions`/`--data-center`/`--country`/`--registry-auth-id` reach
+  GraphQL-only fields `runpodctl`'s own CLI doesn't expose at all (checked:
+  `runpodctl create pod --help`) — a bandwidth floor and an allowed-driver-
+  version filter enforced at creation time instead of discovered (and paid
+  for) after the fact, and a private-registry credential so `--image` can
+  point at a private repo. `--registry-auth-id` defaults from
+  `$WATER_SPIDER_REGISTRY_AUTH_ID` — see
+  [`docker/create-registry-auth.sh`](docker/create-registry-auth.sh) to
+  register a Docker Hub credential with RunPod and get an id. Live-tested
+  end to end: created a real pod against a private image with this set,
+  confirmed via SSH it actually pulled.
 - **`list`** / **`status`** (balance + live spend/hr) / **`get`**
 - **`connect`** — resolves SSH connection info and prints it, with a proxy
   fallback.

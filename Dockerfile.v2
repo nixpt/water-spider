@@ -1,0 +1,126 @@
+# water-spider v2 — GPU-capable control pod.
+#
+# The v1 control pod (Dockerfile.runpod) is deliberately CPU-only — it just
+# orchestrates OTHER pods, no compute of its own. v2 adds real GPU inference
+# capability directly on the control pod itself: llama.cpp (built from source
+# with CUDA — llama.cpp ships NO Linux CUDA prebuilt binaries, only Windows,
+# checked directly against the ggml-org/llama.cpp release assets) + the HF
+# CLI for pulling GGUF models. zorro itself stays OUT of this image — it's
+# private, and this image is meant to be publishable/general-purpose, not a
+# zorro redistribution. What's borrowed from zorro's own docker/ tooling is
+# generic GPU-ops knowledge (SSH self-heal, clock-locking for reproducible
+# benchmarks) — not zorro's source or binaries.
+#
+# Build:
+#   docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
+#     --build-arg CUDA_ARCHS="89;90;120" .
+#   (CUDA_ARCHS default covers Ada/Hopper/Blackwell — this fleet's own GPUs
+#   are sm_120/Blackwell, but a general-purpose image should run on whatever
+#   RunPod assigns; narrow it for a faster build if you know the target.)
+#
+# Deploy: docker/create-runpod-template.sh (same script as v1's control pod,
+# point IMAGE/TAG/CATEGORY at this image — see its own header).
+
+FROM runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404
+
+ARG RUNPODCTL_VERSION=2.9.0
+ARG RUNPODCTL_SHA256=06e6f54957db79d5cd9f1909a7f1d365076826751ba2f5df65d75dde43a64148
+ARG LLAMACPP_REF=b10451
+ARG CUDA_ARCHS="89;90;120"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        jq \
+        openssh-client \
+        iproute2 \
+        bsdextrautils \
+        xauth \
+        cmake \
+        build-essential \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /usr/local/bin/runpodctl \
+        "https://github.com/runpod/runpodctl/releases/download/v${RUNPODCTL_VERSION}/runpodctl-linux-amd64" \
+    && echo "${RUNPODCTL_SHA256}  /usr/local/bin/runpodctl" | sha256sum -c - \
+    && chmod +x /usr/local/bin/runpodctl
+
+# HF tooling: `hf` CLI (huggingface_hub[cli]) for pulling GGUF models, plus
+# hf_transfer for the same fast-parallel-chunk download path zorro's own
+# `pull` feature uses (HF_HUB_ENABLE_HF_TRANSFER=1 below).
+RUN pip install --no-cache-dir --break-system-packages 'huggingface_hub[cli]' hf_transfer
+
+# llama.cpp: no Linux CUDA prebuilt release exists (checked ggml-org/llama.cpp
+# release assets directly — Windows gets cuda zips, Linux only gets cpu/
+# vulkan/sycl) — build from source. Selective --target keeps this to the
+# binaries actually useful here, not the full test/example suite.
+# ggml-cuda's VMM allocator path links against CUDA::cuda_driver (libcuda.so.1,
+# the DRIVER api) via CMake's find_package(CUDAToolkit) imported target — an
+# absolute-path lookup, not a bare -lcuda flag, so pointing the linker at the
+# devel base's link-time stub (/usr/local/cuda/lib64/stubs/libcuda.so) via -L
+# does NOT fix it: real libcuda.so.1 only exists once a GPU is actually
+# attached (nvidia-container-runtime injects it at `docker run`, not present
+# at `docker build` time), and CMake's own driver-library lookup comes up
+# empty in a build stage regardless of search path. llama.cpp's own
+# CMakeLists documents GGML_CUDA_NO_VMM for exactly this — skip linking the
+# driver API, use its non-VMM allocator path instead (fully functional at
+# runtime; only the newer virtual-memory-management allocation strategy is
+# skipped, not CUDA compute itself). Checked ggml/src/ggml-cuda/CMakeLists.txt
+# directly rather than guessing: `target_link_libraries(... CUDA::cuda_driver)`
+# is gated behind `if (NOT GGML_CUDA_NO_VMM)`.
+# GGML_NATIVE defaults ON upstream (-march=native, i.e. targets THIS BUILD
+# MACHINE's exact CPU) — a real bug found live: the RunPod pod's host CPU
+# doesn't support some instruction this dev box's CPU has, and every
+# llama.cpp binary SIGILL'd (Illegal instruction, core dumped) the instant
+# it ran on a real pod, despite working fine in local docker-run smoke
+# tests (same machine that built it). Explicit portable baseline instead —
+# SSE4.2/AVX/AVX2/BMI2 are universal on any x86-64 cloud/server CPU from
+# the last decade; AVX512 stays off since it's NOT universal and would
+# reintroduce the same class of crash on an older host.
+RUN git clone --depth 1 --branch "${LLAMACPP_REF}" https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp \
+    && git -C /opt/llama.cpp rev-parse HEAD > /opt/llama.cpp.commit \
+    && cmake -B /opt/llama.cpp/build -S /opt/llama.cpp \
+         -DGGML_CUDA=ON -DGGML_CUDA_NO_VMM=ON \
+         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+         -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF \
+         -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON \
+         -DGGML_AVX512=OFF \
+    && cmake --build /opt/llama.cpp/build --config Release -j"$(nproc)" \
+         --target llama-cli llama-server llama-quantize llama-bench llama-gguf-split
+
+# Separate RUN so an install-step-only fix doesn't force a full recompile —
+# llama.cpp's build produces the tool binaries AND a set of shared libraries
+# they dynamically link against (libggml-cuda.so, libllama-common.so, per-
+# tool -impl.so files) in the same build/bin/ dir. Installing only the
+# executables and deleting build/ (as an earlier version of this Dockerfile
+# did) breaks every one of them at runtime with a missing .so error — found
+# live: `llama-cli --version` failed with exactly that before this was split
+# out. Install the libs to the normal ldconfig search path, not alongside
+# the binaries — cleaner than fighting rpath.
+RUN install -m755 -t /usr/local/bin \
+         /opt/llama.cpp/build/bin/llama-cli /opt/llama.cpp/build/bin/llama-server \
+         /opt/llama.cpp/build/bin/llama-quantize /opt/llama.cpp/build/bin/llama-bench \
+         /opt/llama.cpp/build/bin/llama-gguf-split \
+    && install -m755 -t /usr/local/lib /opt/llama.cpp/build/bin/*.so* \
+    && ldconfig \
+    && rm -rf /opt/llama.cpp/build /opt/llama.cpp/.git
+
+COPY bin/water-spider /usr/local/bin/water-spider
+RUN chmod +x /usr/local/bin/water-spider
+
+# Same self-heal hook zorro's v3 image and water-spider v1's control pod use
+# — the base's own /start.sh picks this up via execute_script("/post_start.sh").
+# NO ENTRYPOINT/CMD override.
+COPY docker/post_start.sh /post_start.sh
+RUN chmod +x /post_start.sh
+
+COPY docker/water-spider-pod-init.sh /usr/local/bin/water-spider-pod-init
+RUN chmod +x /usr/local/bin/water-spider-pod-init
+
+ENV HF_HOME=/workspace/scratch/hf-cache \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    WATER_SPIDER_MODELS_DIR=/workspace/scratch/models
+
+RUN mkdir -p /workspace/scratch/{models,builds,tmp,hf-cache} \
+    && printf '{\n  "built": "%s",\n  "base": "runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404",\n  "variant": "water-spider-v2-gpu",\n  "cuda_archs": "%s",\n  "llama_cpp_ref": "%s",\n  "llama_cpp_commit": "%s",\n  "note": "GPU control pod: llama.cpp + HF CLI + water-spider on PATH. zorro NOT included (private)."\n}\n' \
+         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CUDA_ARCHS}" "${LLAMACPP_REF}" "$(cat /opt/llama.cpp.commit)" \
+       > /etc/water-spider-image.json

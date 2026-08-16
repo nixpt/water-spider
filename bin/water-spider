@@ -35,6 +35,10 @@
 #                        #  (pattern ported from checkstand-core's checkout())
 #                        [--min-download MBPS] [--min-upload MBPS]
 #                        [--cuda-versions "12.4,12.5"] [--data-center ID] [--country CC]
+#                        [--registry-auth-id ID]  # RunPod containerRegistryAuthId —
+#                        #  required to pull a PRIVATE image (defaults from
+#                        #  $WATER_SPIDER_REGISTRY_AUTH_ID so you don't need
+#                        #  to pass it every time for a private image family)
 #                        #  GraphQL-only fields runpodctl's CLI doesn't expose —
 #                        #  given any of these, create switches to a direct
 #                        #  GraphQL call instead of runpodctl (same downstream
@@ -215,7 +219,7 @@ ws_create_via_graphql() {
   local name="$1" image="$2" template_id="$3" gpu="$4" gpu_count="$5" \
         disk="$6" volume="$7" cloud="$8" ports="$9"
   shift 9
-  local min_dl="$1" min_ul="$2" cuda_versions="$3" dc="$4" country="$5"
+  local min_dl="$1" min_ul="$2" cuda_versions="$3" dc="$4" country="$5" registry_auth_id="$6"
 
   need curl
   local fields=("name: $(ws_gql_string "$name")" "cloudType: $cloud" "startSsh: true"
@@ -236,6 +240,13 @@ ws_create_via_graphql() {
   fi
   [ -n "$dc" ] && fields+=("dataCenterId: $(ws_gql_string "$dc")")
   [ -n "$country" ] && fields+=("countryCode: $(ws_gql_string "$country")")
+  # containerRegistryAuthId: needed the moment `--image`/imageName points at
+  # a PRIVATE registry repo — RunPod can't pull it anonymously otherwise.
+  # runpodctl's CLI/REST `pod create` has NO flag for this at all (checked:
+  # `runpodctl create pod --help`) — same class of gap as minDownload/
+  # allowedCudaVersions above, hence routed through this same GraphQL path
+  # rather than a runpodctl flag that doesn't exist.
+  [ -n "$registry_auth_id" ] && fields+=("containerRegistryAuthId: $(ws_gql_string "$registry_auth_id")")
 
   local joined; joined="$(printf '%s\n' "${fields[@]}" | paste -sd, -)"
   local query="mutation { podFindAndDeployOnDemand(input: { $joined }) { id imageName machineId machine { podHostId } } }"
@@ -255,6 +266,10 @@ cmd_create() {
   local image="${WATER_SPIDER_IMAGE:-}"
   local name="" gpu="" gpu_count=1 ports="22/tcp" disk=60 volume=200 cloud="SECURE" restore="" idem_key=""
   local min_dl="" min_ul="" cuda_versions="" dc="" country=""
+  # Default from WATER_SPIDER_REGISTRY_AUTH_ID so `nixpt/zorro`-family
+  # private-image pulls just work without remembering the flag every time —
+  # explicit --registry-auth-id (including "" to force-disable) still wins.
+  local registry_auth_id="${WATER_SPIDER_REGISTRY_AUTH_ID:-}"
   while [ $# -gt 0 ]; do
     case "$1" in
       --template-id) template_id="$2"; shift 2 ;;
@@ -276,6 +291,10 @@ cmd_create() {
                         # filters the driver/toolkit PTX mismatch class
       --data-center) dc="$2"; shift 2 ;;
       --country) country="$2"; shift 2 ;;
+      --registry-auth-id) registry_auth_id="$2"; shift 2 ;;  # RunPod
+                        # containerRegistryAuthId — required to pull a
+                        # PRIVATE image (e.g. nixpt/zorro since 2026-08-16).
+                        # Defaults from $WATER_SPIDER_REGISTRY_AUTH_ID.
       *) die "create: unknown flag '$1'" ;;
     esac
   done
@@ -356,13 +375,16 @@ cmd_create() {
   runpodctl pod list -o json | jq -r '.[] | "  \(.id)  \(.name // "-")  \(.desiredStatus // .status // "-")"' 2>/dev/null || echo "  (none)"
 
   local out
-  if [ -n "$min_dl" ] || [ -n "$min_ul" ] || [ -n "$cuda_versions" ] || [ -n "$dc" ] || [ -n "$country" ]; then
+  if [ -n "$min_dl" ] || [ -n "$min_ul" ] || [ -n "$cuda_versions" ] || [ -n "$dc" ] || [ -n "$country" ] || [ -n "$registry_auth_id" ]; then
     echo "==> creating via GraphQL (min-download=$min_dl min-upload=$min_ul cuda-versions=$cuda_versions" \
-         "data-center=$dc country=$country) — runpodctl's CLI doesn't expose these fields"
-    echo "    NOT live-tested this session (would create a real billed pod to verify) —"
-    echo "    endpoint/mutation shape verified against runpod-python's own source, not exercised live"
+         "data-center=$dc country=$country registry-auth-id=$registry_auth_id) — runpodctl's CLI doesn't expose these fields"
+    if [ -z "$registry_auth_id" ] || [ -n "$min_dl$min_ul$cuda_versions$dc$country" ]; then
+      echo "    min-download/min-upload/cuda-versions/data-center/country: NOT live-tested this" \
+           "session (would create a real billed pod to verify) — endpoint/mutation shape" \
+           "verified against runpod-python's own source only"
+    fi
     out="$(ws_create_via_graphql "$name" "$image" "$template_id" "$gpu" "$gpu_count" \
-      "$disk" "$volume" "$cloud" "$ports" "$min_dl" "$min_ul" "$cuda_versions" "$dc" "$country")" \
+      "$disk" "$volume" "$cloud" "$ports" "$min_dl" "$min_ul" "$cuda_versions" "$dc" "$country" "$registry_auth_id")" \
       || die "GraphQL create failed — check output above, do NOT blindly retry"
   else
     local args=(pod create --name "$name" --gpu-id "$gpu" --gpu-count "$gpu_count" \
