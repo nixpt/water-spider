@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-006 |
 | **Priority** | P2 |
-| **Status** | Backlog |
+| **Status** | Done |
 | **Phase** | Project metadata |
 | **Assignee** | unassigned |
 | **Dependencies** | none |
@@ -22,10 +22,10 @@ Planning files still describe the project as Rust, leave its protocol and north 
 
 ## Success criteria
 
-- [ ] Project metadata identifies Bash and the RunPod lifecycle CLI protocol accurately.
-- [ ] The roadmap defines a concrete north star and sequences the existing tickets into milestones.
-- [ ] Planning state reports the current implementation and validation maturity.
-- [ ] Dejavue context contains useful build/test and architecture guidance rather than empty stubs.
+- [x] Project metadata identifies Bash and the RunPod lifecycle CLI protocol accurately.
+- [x] The roadmap defines a concrete north star and sequences the existing tickets into milestones.
+- [x] Planning state reports the current implementation and validation maturity.
+- [x] Dejavue context contains useful build/test and architecture guidance rather than empty stubs.
 
 ## Technical approach
 
@@ -43,3 +43,7 @@ Planning files still describe the project as Rust, leave its protocol and north 
 ## Non-goals
 
 - Changing CLI behavior.
+
+## Resolution
+
+Corrected the project language and protocol, replaced the empty roadmap with four sequenced milestones, recorded current quality and external blockers in planning state, and populated Dejavue with cost-safety rules, exact verification commands, and an architecture map. The metadata now agrees with the implemented Bash CLI and its 29-test harness.
