@@ -1,5 +1,12 @@
 # water-spider Docker images
 
+The public Docker Hub landing page is maintained in
+[`DOCKERHUB.md`](DOCKERHUB.md). Changes merged to `main` are published by the
+`Docker Hub description` workflow when the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_PAT` repository secrets are configured. For a manual refresh, export
+the same variables and run `scripts/update-dockerhub-description.sh` from the
+repository root.
+
 Three separate images, three different jobs. None of them bundle `zorro`
 — it's a private repo and a separate concern; these images are about
 running water-spider (and, for `:v2`, llama.cpp) portably.
