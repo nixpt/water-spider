@@ -1,0 +1,38 @@
+# water-spider training image. Inherits CUDA + llama.cpp from v2.
+# Build v2 first, then: docker build -f Dockerfile.train -t nixpt/water-spider:train .
+FROM nixpt/water-spider:v2
+
+ARG TORCH_VERSION=2.9.1
+ARG TRANSFORMERS_VERSION=5.14.1
+ARG TRL_VERSION=1.10.0
+ARG PEFT_VERSION=0.20.0
+ARG DATASETS_VERSION=5.0.1
+ARG ACCELERATE_VERSION=1.14.0
+ARG FLA_VERSION=0.5.1
+ARG CAUSAL_CONV1D_VERSION=1.6.2.post1
+ARG HF_HUB_VERSION=1.27.0
+
+# The v2 base is CUDA 12.8.1 / PyTorch 2.9.1; pin it explicitly so a base
+# refresh cannot silently change the training ABI.
+RUN python -m pip install --no-cache-dir --break-system-packages \
+        --index-url https://download.pytorch.org/whl/cu128 "torch==${TORCH_VERSION}" \
+    && python -m pip install --no-cache-dir --break-system-packages \
+        "transformers==${TRANSFORMERS_VERSION}" "trl==${TRL_VERSION}" \
+        "peft==${PEFT_VERSION}" "datasets==${DATASETS_VERSION}" \
+        "accelerate==${ACCELERATE_VERSION}" \
+        "flash-linear-attention[cuda]==${FLA_VERSION}" \
+        "huggingface_hub==${HF_HUB_VERSION}" "ninja==1.13.0" \
+    # causal-conv1d has no matching cu128 wheel for this Python/Torch pair;
+    # disable build isolation so its CUDA extension uses the pinned cu128
+    # Torch rather than pip's unrelated cu130 build dependency.
+    && python -m pip install --no-cache-dir --no-build-isolation --break-system-packages \
+        "causal-conv1d==${CAUSAL_CONV1D_VERSION}" \
+    && true
+
+# No model download or GPU is needed for this regression smoke.  Use a tiny
+# randomly initialized causal LM and pre-tokenized toy rows to exercise the
+# actual TRL training loop once during the image build.
+COPY docker/train-import-smoke.py docker/train-sft-smoke.py /tmp/
+RUN python /tmp/train-import-smoke.py && python /tmp/train-sft-smoke.py
+
+ENV WATER_SPIDER_TRAINING_IMAGE=1

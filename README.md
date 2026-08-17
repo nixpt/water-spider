@@ -96,6 +96,94 @@ Read [common workflows](docs/workflows.md) before automating creation,
 inference, file transfer, snapshots, or teardown. Configuration, credential,
 cache, and private-image behavior is covered in
 [configuration and state](docs/configuration.md).
+```sh
+docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
+  --build-arg CUDA_ARCHS="75;80;86;89;90;120" .   # T4 through Blackwell
+docker build -f Dockerfile.train -t nixpt/water-spider:train .
+```
+
+After SSH-ing into a v2 pod, run `water-spider-pod-init` first (GPU
+clock-lock + verify, same reproducible-benchmark discipline zorro's own
+`zorro-pod-init` uses — generic GPU-ops knowledge, not zorro-specific
+code). Then:
+
+```sh
+hf download <repo> <file.gguf> --local-dir /workspace/scratch/models
+llama-server -m /workspace/scratch/models/<file.gguf> --port 8080 -ngl 999
+```
+
+`llama-cli`, `llama-server`, `llama-quantize`, `llama-bench`, and
+`llama-gguf-split` are all on `PATH`.
+
+See [`docker/README.md`](docker/README.md) for the full breakdown of all
+four images (what's in each, why they're separate, the `docker/*.sh`
+helper scripts, live RunPod template ids, and the "verified at authoring
+time" test log for each).
+
+## Subcommands
+
+- **`create`** — guards the historical flaky-create-makes-billed-dupes
+  trap: one attempt, verify by `pod list` after, never blind-retry.
+  `--idempotency-key KEY` makes retries safe — a retried `create` with the
+  same key replays the same pod instead of billing a second one (local
+  ledger + `mkdir`-atomic lock). `--min-download`/`--min-upload`/
+  `--cuda-versions`/`--data-center`/`--country`/`--registry-auth-id` reach
+  GraphQL-only fields `runpodctl`'s own CLI doesn't expose at all (checked:
+  `runpodctl create pod --help`) — a bandwidth floor and an allowed-driver-
+  version filter enforced at creation time instead of discovered (and paid
+  for) after the fact, and a private-registry credential so `--image` can
+  point at a private repo. `--registry-auth-id` defaults from
+  `$WATER_SPIDER_REGISTRY_AUTH_ID` — see
+  [`docker/create-registry-auth.sh`](docker/create-registry-auth.sh) to
+  register a Docker Hub credential with RunPod and get an id. Live-tested
+  end to end: created a real pod against a private image with this set,
+  confirmed via SSH it actually pulled.
+- **`list`** / **`status`** (balance + live spend/hr) / **`get`**
+- **`connect`** — resolves SSH connection info and prints it, with a proxy
+  fallback.
+- **`send`** / **`receive`** — prints the paired `runpodctl send`/`receive`
+  croc commands for moving files to/from a pod.
+- **`tunnel`** — SSH local-port-forward so a pod-side service (e.g. a model
+  server) answers on `localhost` on YOUR machine. A local coding harness
+  points at `http://localhost:8080/v1` and transparently reaches the pod's
+  GPU. Needs only port 22 — no extra RunPod port declarations.
+- **`recipe serve <pod-id> <model-path> [--engine ...] [--port N]`** —
+  launch a model server on the pod, auto-tunnel it, print the ready local
+  URL. The "test model X locally, from a harness on MY machine" workflow
+  in one command.
+- **`gui [--x11|--trusted] [--display N] -- <command...>`** — SSH X11
+  forwarding: a GUI app launched on the pod renders in a window on YOUR
+  machine. Prefers [`xpra`](https://xpra.org/) (SSH-transport-native,
+  survives a dropped connection — `x11docker`'s own pick for seamless-window
+  mode) when installed locally; falls back to raw `ssh -X`/`-Y` otherwise.
+  Needs `xauth`/`xpra` on the pod side and `X11Forwarding yes` in sshd.
+- **`snapshot <pod-id> [-o FILE]`** — a lightweight config MANIFEST (model
+  filenames + image provenance), not a filesystem backup — the pod→home
+  transport is too slow for that.
+- **`teardown <pod-id>`** — the full checklist: reminds you to pull results
+  first, confirms before deleting, deletes, then VERIFIES the pod is
+  actually gone rather than trusting the delete call's exit code.
+- **`gpus [--available]`** — `runpodctl gpu list`, filtered/formatted.
+- **`scaffold <name> [flags...]`** — OPTIONAL, fleet-internal only: a thin
+  passthrough to `foreman-scaffold` (needs a sibling
+  [`jokersquad`](https://github.com/nixpt/jokersquad) checkout). Everything
+  else above works standalone with no other nixpt-fleet repo present.
+
+## Design notes
+
+- One transport-agnostic core script, not a wrapper generator — every
+  subcommand shells out to `runpodctl` or the RunPod GraphQL API directly.
+- Cost-safety first: anything that could spend real money against the live
+  API gets a single, verified attempt — never a blind retry loop.
+- `set -euo pipefail` throughout, with the classic `out="$(cmd)"; rc=$?`
+  trap deliberately avoided (`-e` exits before `rc=$?` ever runs, silently
+  swallowing the error) — every capture uses `|| rc=$?` or
+  `if ! var="$(...)"` instead.
+
+## Status
+
+See `STATE.md` for current status and `.jagent/planning/ROADMAP.md` for
+the plan.
 
 ## Documentation
 

@@ -17,7 +17,8 @@ Source, issues, and complete documentation:
 |---|---|---|
 | `latest` | Lightweight, one-shot CLI | `docker run --rm nixpt/water-spider gpus --available` |
 | `pod` | Persistent CPU control pod that manages other pods | SSH in, then run `water-spider` |
-| `v2` | CUDA control pod with llama.cpp and the Hugging Face CLI | Orchestrate and run inference on one GPU pod |
+| `v2` | CUDA control pod with llama.cpp fatbin (`sm_75,80,86,89,90,120`) and the Hugging Face CLI | Orchestrate and run inference on one GPU pod |
+| `train` | v2 plus pinned PyTorch/cu12.8, Transformers 5, TRL, PEFT, datasets, accelerate, FLA, and causal-conv1d | LoRA/SFT experiments and training |
 
 The tags are separate products rather than progressively larger versions of
 the same image. Use `latest` from your own machine, `pod` for a small always-on
@@ -67,6 +68,10 @@ and GPU notes live in the maintained
 
 Supported architectures and exact image sizes can change as base images are
 rebuilt; inspect the selected tag's Docker Hub metadata before deployment.
+
+The current rebuild measured `:v2` at 11.96 GB (11.41 GB before the
+multi-compute-arch fatbin, +0.55 GB) and `:train` at 12.29 GB. Docker Hub
+digests are recorded in the release PR after push.
 
 ## License
 
