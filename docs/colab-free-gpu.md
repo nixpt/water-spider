@@ -69,3 +69,34 @@ on this box. Foreman’s inbox records also document that automated browser/MCP
 execution and reverse-SSH tunneling were rejected by Colab’s interactive-use
 controls. Use the notebook UI manually and do not build a harness or attempt
 to bypass those controls.
+
+## Programmatic Colab access — the `colab` CLI (foreman correction, 2026-08-17)
+
+The "manual notebook UI only" posture elsewhere in the workspace records
+applies to the ABANDONED browser-automation/reverse-tunnel attempts
+(2026-07-07, Google ToS enforcement). A sanctioned programmatic path exists
+and is installed on the dev box as a uv tool:
+
+- Binary: `~/.local/share/uv/tools/google-colab-cli/bin/colab`
+  (google-colab-cli 0.6.0)
+- Operator skill (READ FIRST):
+  `~/.cache/uv/archive-v0/gpWfKojn1O0iMqXH/colab_cli/COLAB_SKILL.md` —
+  ADC auth with four scopes, `colab new` allocates a billable VM that
+  nothing reclaims except `colab stop` / a 24h cap, kernel state persists
+  across `colab exec` calls, default cwd `/content`.
+
+The pip bootstrap above works verbatim through `colab exec`. Prior art: the
+captain's **zebra** model series was trained on Colab via the zazen-colab
+harness (zorro branch `worktree-agent-a01729b9e2b694793`, tree
+`tools/zazen-colab/`; checkpoints at `/workspace/scratch/tmp/zebra-ckpts*`),
+and [main]'s colab-gpu-ops runs measured zorro cuda/mmq at 16.8 tok/s
+GPU-resident on a T4.
+
+## The Kaggle lane (second free-GPU path)
+
+zorro main already carries productionized Kaggle scripts
+(`zorro/scripts/kaggle/` — "free cross-arch zorro CUDA build/parity on
+Kaggle GPU", incl. preflight and env helpers). Kaggle offers P100/T4×2
+sessions with a weekly quota; the same sm_75-in-fatbin argument applies.
+Prefer Kaggle when a run needs longer wall-clock than a Colab free session
+tolerates.
