@@ -13,10 +13,10 @@
 #
 # Build:
 #   docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
-#     --build-arg CUDA_ARCHS="86;89;90;120" .
-#   (CUDA_ARCHS default covers Ampere/Ada/Hopper/Blackwell — this fleet's GPUs
-#   are sm_120/Blackwell, but a general-purpose image should run on whatever
-#   RunPod assigns; narrow it for a faster build if you know the target.)
+#     --build-arg CUDA_ARCHS="75;80;86;89;90;120" .
+#   (CUDA_ARCHS default covers T4/Turing through Blackwell — includes sm_75
+#   for free Colab/Kaggle T4s and sm_80 for A100 pods; narrow it for a
+#   faster build if you know the target.)
 #
 # Deploy: docker/create-runpod-template.sh (same script as v1's control pod,
 # point IMAGE/TAG/CATEGORY at this image — see its own header).
@@ -34,7 +34,7 @@ FROM runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404
 ARG RUNPODCTL_VERSION=2.9.0
 ARG RUNPODCTL_SHA256=06e6f54957db79d5cd9f1909a7f1d365076826751ba2f5df65d75dde43a64148
 ARG LLAMACPP_REF=b10451
-ARG CUDA_ARCHS="86;89;90;120"
+ARG CUDA_ARCHS="75;80;86;89;90;120"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         jq \
