@@ -19,6 +19,7 @@ docker pull ghcr.io/nixpt/water-spider:v2
 ```
 
 Three separate images, three different jobs. None of them bundle `zorro`
+Four separate images, four different jobs. None of them bundle `zorro`
 — it's a private repo and a separate concern; these images are about
 running water-spider (and, for `:v2`, llama.cpp) portably.
 
@@ -26,7 +27,8 @@ running water-spider (and, for `:v2`, llama.cpp) portably.
 |---|---|---|---|---|
 | `:latest` / `:2.9.0` | `../Dockerfile` | `debian:bookworm-slim` | 179MB | One-shot CLI: `docker run --rm nixpt/water-spider create ...` |
 | `:pod` | `../Dockerfile.runpod` | `runpod/base:1.1.0-rc.154-ubuntu2204` | 2.81GB | CPU control pod — orchestrates *other* pods, no compute of its own |
-| `:v2` | `../Dockerfile.v2` | `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404` | 32.2GB | GPU control pod — llama.cpp (CUDA) + `hf` CLI, does its own inference |
+| `:v2` | `../Dockerfile.v2` | `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404` | 11.96GB rebuilt (11.41GB before; +0.55GB) | GPU control pod — llama.cpp CUDA fatbin (`75;80;86;89;90;120`) + `hf` CLI |
+| `:train` | `../Dockerfile.train` | `nixpt/water-spider:v2` | 12.29GB | v2 plus pinned PyTorch/Transformers/TRL/PEFT/datasets/accelerate and FLA GDN stack |
 
 GHCR also retains immutable project-version tags: `:<version>`,
 `:pod-<version>`, and `:v2-<version>`. For example, release `0.4.0` publishes
@@ -56,10 +58,13 @@ docker build -t nixpt/water-spider .
 # CPU control pod
 docker build -f Dockerfile.runpod -t nixpt/water-spider:pod .
 
-# GPU control pod (CUDA_ARCHS default covers Ampere/Ada/Hopper/Blackwell —
-# narrow it to your actual target for a much faster build)
+# GPU control pod (fatbin covers T4/Turing through Blackwell — sm_75 for
+# free Colab/Kaggle T4s, sm_80 for A100 pods; narrow for faster builds)
 docker build -f Dockerfile.v2 -t nixpt/water-spider:v2 \
-  --build-arg CUDA_ARCHS="86;89;90;120" .
+  --build-arg CUDA_ARCHS="75;80;86;89;90;120" .
+
+# Training / fine-tuning variant (build v2 first)
+docker build -f Dockerfile.train -t nixpt/water-spider:train .
 ```
 
 ## Why `:v2` exists separately from `:pod`
