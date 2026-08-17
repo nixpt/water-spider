@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-17
+
+- feat: multi-arch CUDA v2 and training image (#2)
+
+
+
 ## [0.5.0] - 2026-08-16
 
 - Merge pull request #1 from nixpt/ticket/waters-020-mayfly-opencode
