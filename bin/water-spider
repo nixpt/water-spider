@@ -739,17 +739,59 @@ cmd_snapshot() {
     die "could not resolve pod host/port (see: water-spider connect $id)"
   fi
 
-  echo "==> collecting manifest from $id (NOT live-tested this session)"
-  local models provenance
-  models="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" \
-    'ls "${ZORRO_MODELS_DIR:-/workspace/scratch/models}" 2>/dev/null | jq -R -s "split(\"\n\") | map(select(length>0))"' \
-    2>/dev/null || echo '[]')"
+  echo "==> collecting manifest from $id"
+  # Live-tested 2026-08-19 (s469) against a pod this tool did NOT create
+  # (runpod/pytorch base, models under /workspace/models). Both original data
+  # sources missed and it wrote {} + [] while printing success — a snapshot
+  # that captures nothing must not look identical to one that worked, so this
+  # now probes several locations and FAILS LOUDLY on an empty result.
+  local models models_dir provenance image gpu
+  # Probe candidates in order; first non-empty wins. $ZORRO_MODELS_DIR is
+  # honoured when the pod sets it, but is NOT assumed to be set.
+  # Remote side emits plain TSV only — do NOT require jq on the pod (a stock
+  # runpod/pytorch image has no jq; assuming it is why this returned nothing).
+  # Line 1 = the directory that won; remaining lines = "<path>\t<bytes>".
+  local raw
+  raw="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" '
+    for d in "${ZORRO_MODELS_DIR:-}" /workspace/models /workspace/scratch/models /root/models /models; do
+      [ -n "$d" ] || continue
+      if [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]; then
+        echo "$d"
+        find "$d" -maxdepth 2 \( -name "*.gguf" -o -name "*.safetensors" \) \
+             -printf "%p\t%s\n" 2>/dev/null
+        exit 0
+      fi
+    done
+    echo NONE' 2>/dev/null || echo NONE)"
+  models_dir="$(printf '%s\n' "$raw" | head -1)"
+  models="$(printf '%s\n' "$raw" | tail -n +2 \
+    | jq -R -s 'split("\n") | map(select(length>0)) | map(split("\t") | {path: .[0], bytes: (.[1]|tonumber)})')"
+  [ -n "$models" ] || models='[]'
+
+  # Provenance: the zorro-image marker when present, else fall back to the
+  # image RunPod itself reports — a foreign pod still has a recorded image.
   provenance="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" 'cat /etc/zorro-image.json 2>/dev/null || echo "{}"')"
-  jq -n --argjson models "$models" --argjson provenance "$provenance" --arg pod "$id" \
-    '{pod_id: $pod, image_provenance: $provenance, model_files: $models,
-      note: "manifest only — re-provisions by filename via hf download, does not carry bytes"}' \
+  image="$(rp_json pod get "$id" 2>/dev/null | jq -r '.imageName // .image // "unknown"' 2>/dev/null || echo unknown)"
+  gpu="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" \
+    'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1' 2>/dev/null || echo "")"
+
+  jq -n --argjson models "${models:-[]}" --argjson provenance "$provenance" \
+        --arg pod "$id" --arg dir "$models_dir" --arg image "$image" --arg gpu "$gpu" \
+    '{pod_id: $pod, image: $image, gpu: $gpu,
+      models_dir: $dir, image_provenance: $provenance, model_files: $models,
+      note: "manifest only — re-provisions by filename, does not carry bytes"}' \
     > "$out"
-  echo "==> wrote $out"
+
+  # A manifest with no models is almost never what the caller wanted. Say so.
+  local n; n="$(jq '.model_files | length' "$out" 2>/dev/null || echo 0)"
+  if [ "$n" = "0" ]; then
+    echo "!! WARNING: captured ZERO model files (models_dir=$models_dir)." >&2
+    echo "   The pod may store models elsewhere — set ZORRO_MODELS_DIR on the pod," >&2
+    echo "   or check by hand:  water-spider connect $id" >&2
+    echo "   $out was still written, but it is an EMPTY manifest — do not treat" >&2
+    echo "   it as a successful snapshot." >&2
+  fi
+  echo "==> wrote $out ($n model file(s), image=$image)"
   echo "==> replay on a fresh pod (once running): print the model list and re-pull each"
   echo "    by name — this tool doesn't know which HF repo each file came from, so"
   echo "    restoring is a starting checklist, not a fully automated step yet:"
