@@ -22,7 +22,7 @@ API_BASE="https://rest.runpod.io/v1"
 AUTHS_ENDPOINT="$API_BASE/containerregistryauth"
 
 # Check for an existing credential with the same name and reuse it if present.
-existing="$(curl -sS -H "Authorization: ******" "$AUTHS_ENDPOINT")" || {
+existing="$(curl -sS -H "Authorization: Bearer ${RUNPOD_KEY}" "$AUTHS_ENDPOINT")" || {
   echo "ERROR: failed to query existing container registry auths" >&2
   echo "$existing" >&2
   exit 1
@@ -37,15 +37,17 @@ if [[ -n "$existing_id" ]]; then
 fi
 
 # Build request body (use python3 to avoid requiring jq on callers that may not have it;
-# jq is used above to inspect results and is common in this repo's tooling)
-BODY="$(python3 - <<PY
-import json,sys
-print(json.dumps({"name": "$NAME", "username": "nixpt", "password": "$DOCKERHUB_PAT"}))
-PY
-)"
+# jq is used above to inspect results and is common in this repo's tooling).
+# NAME/DOCKERHUB_PAT are passed as argv, not interpolated into the Python
+# source itself -- a token containing a quote or backslash would otherwise
+# break out of the string literal (or worse) if substituted directly in.
+BODY="$(python3 -c "
+import json, sys
+print(json.dumps({'name': sys.argv[1], 'username': 'nixpt', 'password': sys.argv[2]}))
+" "$NAME" "$DOCKERHUB_PAT")"
 
 RESP="$(curl -sS -X POST "$AUTHS_ENDPOINT" \
-  -H "Authorization: ******" \
+  -H "Authorization: Bearer ${RUNPOD_KEY}" \
   -H "Content-Type: application/json" \
   -d "$BODY")" || {
     echo "ERROR: POST failed" >&2
