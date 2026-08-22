@@ -1,33 +1,70 @@
 #!/usr/bin/env bash
 # Register Docker Hub credentials with RunPod so `water-spider create` can
-# pull a PRIVATE nixpt image (nixpt/zorro has been private since 2026-08-16).
-# `runpodctl create pod --help` has NO flag for this at all — checked
-# directly, not assumed — so this, like minDownload/allowedCudaVersions,
-# only exists via the REST/GraphQL API, never via the CLI.
-#
-# Usage:
-#   docker/create-registry-auth.sh
-#   export WATER_SPIDER_REGISTRY_AUTH_ID=<id from the output>
-#   water-spider create --image nixpt/zorro:v3 --gpu "..." ...   # now just works
-#
-# Live-tested end to end (2026-08-16): ran this, created a real pod with
-# --registry-auth-id set to the resulting id, confirmed via SSH that the
-# pod actually pulled the (by-then-private) image and `zorro --version`
-# ran — not just that the RunPod API accepted the field syntactically.
-# Current live id: cmsvny408000t1p6ujkm1o1uc (name "nixpt-dockerhub").
-#
-# NOT idempotent — RunPod's `name` field must be unique per account; running
-# this twice with the same name fails rather than replacing. Check existing
-# creds first: GET https://rest.runpod.io/v1/containerregistryauth
+# pull a PRIVATE nixpt image. See usage in repository docs.
 set -euo pipefail
+
 NAME="${1:-nixpt-dockerhub}"
-RUNPOD_KEY="$(secure-env get RUNPOD_API_KEY)"
-DOCKERHUB_PAT="$(secure-env get DOCKERHUB_PAT)"
+
+# Retrieve secrets (secure-env tool is used elsewhere in this repo)
+RUNPOD_KEY="$(secure-env get RUNPOD_API_KEY || true)"
+DOCKERHUB_PAT="$(secure-env get DOCKERHUB_PAT || true)"
+
+if [[ -z "$RUNPOD_KEY" ]]; then
+  echo "ERROR: RUNPOD_API_KEY not found via secure-env" >&2
+  exit 1
+fi
+if [[ -z "$DOCKERHUB_PAT" ]]; then
+  echo "ERROR: DOCKERHUB_PAT not found via secure-env" >&2
+  exit 1
+fi
+
+API_BASE="https://rest.runpod.io/v1"
+AUTHS_ENDPOINT="$API_BASE/containerregistryauth"
+
+# Check for an existing credential with the same name and reuse it if present.
+existing="$(curl -sS -H "Authorization: Bearer ${RUNPOD_KEY}" "$AUTHS_ENDPOINT")" || {
+  echo "ERROR: failed to query existing container registry auths" >&2
+  echo "$existing" >&2
+  exit 1
+}
+
+existing_id="$(echo "$existing" | jq -r --arg name "$NAME" '.[]? | select(.name == $name) | .id' 2>/dev/null || true)"
+
+if [[ -n "$existing_id" ]]; then
+  echo "Found existing registry auth with name '$NAME': $existing_id"
+  echo "export WATER_SPIDER_REGISTRY_AUTH_ID=$existing_id"
+  exit 0
+fi
+
+# Build request body (use python3 to avoid requiring jq on callers that may not have it;
+# jq is used above to inspect results and is common in this repo's tooling).
+# NAME/DOCKERHUB_PAT are passed as argv, not interpolated into the Python
+# source itself -- a token containing a quote or backslash would otherwise
+# break out of the string literal (or worse) if substituted directly in.
 BODY="$(python3 -c "
-import json,sys
+import json, sys
 print(json.dumps({'name': sys.argv[1], 'username': 'nixpt', 'password': sys.argv[2]}))
 " "$NAME" "$DOCKERHUB_PAT")"
-curl -sS -X POST "https://rest.runpod.io/v1/containerregistryauth" \
-  -H "Authorization: Bearer ${RUNPOD_KEY}" -H 'Content-Type: application/json' \
-  -d "$BODY"
+
+RESP="$(curl -sS -X POST "$AUTHS_ENDPOINT" \
+  -H "Authorization: Bearer ${RUNPOD_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$BODY")" || {
+    echo "ERROR: POST failed" >&2
+    echo "$RESP" >&2
+    exit 1
+}
+
+# Validate and extract id
+if ! echo "$RESP" | jq -e '.id' >/dev/null 2>&1; then
+  echo "ERROR: failed to create registry auth. Response from RunPod:" >&2
+  echo "$RESP" >&2
+  exit 1
+fi
+
+id="$(echo "$RESP" | jq -r '.id')"
+echo "Created registry auth: $id"
+echo "$RESP" | jq '.'
 echo
+echo "To use it in this shell:"
+echo "  export WATER_SPIDER_REGISTRY_AUTH_ID=$id"
