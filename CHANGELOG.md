@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-22
+
+- security: remove leaked local dev config, harden .gitignore (#4)
+
+
+
 ## [0.6.0] - 2026-08-17
 
 - feat: multi-arch CUDA v2 and training image (#2)
