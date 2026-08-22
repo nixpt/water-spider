@@ -10,8 +10,11 @@
 .dejavue/embedder_circuit.json
 .dejavue/timeline.jsonl.bak-*
 
-# .jagent: planning files are committed; runtime databases and connector
-# artifacts are local-only.
+# .jagent: planning files are committed; runtime databases, connector
+# artifacts, and MCP server configs (which carry live per-worktree secrets)
+# are local-only. The narrower `*.mcp.json` glob below missed
+# `mcp_servers.json` -- broadened to `*mcp*.json` after that exact file
+# leaked a real (if since-rotated) JWT_SECRET to this public repo.
 .jagent/*.db
 .jagent/*.db-shm
 .jagent/*.db-wal
@@ -20,4 +23,24 @@
 .jagent/*.sock
 .jagent/cache/
 .jagent/mcp/
-.jagent/*.mcp.json
+.jagent/*mcp*.json
+
+# Local agent-worktree dev config: never belongs in this repo's history.
+# A root .mcp.json and a whole .dispatch/ persona bundle (fleet-internal
+# worktree-dispatch scaffolding, not part of this project) were committed
+# alongside real project files and had to be removed after the fact --
+# ignored going forward so it can't happen again.
+/.mcp.json
+/.dispatch/
+
+# Generic secret-shaped files -- defense in depth, not a substitute for
+# not committing secrets in the first place.
+*.env
+.env.*
+*.pem
+*.p12
+id_rsa*
+id_ed25519*
+id_ecdsa*
+credentials*.json
+.netrc
