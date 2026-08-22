@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-22
+
+- security: re-remove leaked dev config reintroduced by PR #3's rebase (#5)
+
+
+
 ## [0.6.2] - 2026-08-22
 
 - scripts: make docker/create-registry-auth.sh idempotent and more robust (#3)
