@@ -15,6 +15,7 @@ full details on each `WATERS-N` ID.
 
 ## P1 — Release Readiness
 
+- [ ] [WATERS-022](tickets/WATERS-022-wsforge-pod-confinement.md) — Bake wsforge-style agent confinement into the pod images
 - [ ] [WATERS-021](tickets/WATERS-021-ampere-agent-validation.md) — Publish and live-validate Ampere agent inference
 - [x] [WATERS-020](tickets/WATERS-020-mayfly-opencode.md) — Connect Mayfly and OpenCode to tunneled v2 inference
 - [x] [WATERS-018](tickets/WATERS-018-ghcr-publishing.md) — Publish all image variants to GHCR on release
