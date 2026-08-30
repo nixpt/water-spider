@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-30
+
+- file WATERS-022: bake wsforge-style agent confinement into the pod images (#6)
+
+
+
 ## [0.6.3] - 2026-08-22
 
 - security: re-remove leaked dev config reintroduced by PR #3's rebase (#5)
