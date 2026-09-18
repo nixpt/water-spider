@@ -56,6 +56,11 @@ run_case "recipe rejects unknown engine" 1 "zorro|llama|llama-agent|pf" "$CLI" r
 run_case "Mayfly OpenCode bridge checks endpoint" 0 "OpenAI-compatible model catalog reached" "$MAYFLY_BRIDGE" check
 run_case "gui x11" 0 "FAKE_SSH_OK" env DISPLAY=:0 "$CLI" gui pod-1 --x11 -- xterm
 run_case "snapshot" 0 "wrote $TEST_TMP/snapshot.json" "$CLI" snapshot pod-1 -o "$TEST_TMP/snapshot.json"
+run_case "snapshot carries scripts + serve + runtime (WATERS-023)" 0 "scripts:   /root/serve.sh" "$CLI" snapshot pod-1 -o "$TEST_TMP/snapshot.json"
+run_case "snapshot masks secrets in serve env" 0 "HF_TOKEN=[masked]" jq -r '.serve.env[]' "$TEST_TMP/snapshot.json"
+run_case "snapshot records serve argv + gpu" 0 "vllm serve" jq -r '.serve.argv, .runtime.gpu' "$TEST_TMP/snapshot.json"
+run_case "restore-scripts writes each carried script" 0 "1 script(s) restored" "$CLI" restore-scripts pod-1 "$TEST_TMP/snapshot.json"
+run_case "create --restore lists carried scripts" 0 "restore-scripts pod-new" "$CLI" create --image example/image:latest --gpu "NVIDIA RTX 4090" --restore "$TEST_TMP/snapshot.json"
 run_case "teardown verifies deletion" 0 "confirmed gone" run_with_input_mode y empty-list "$CLI" teardown pod-1
 run_case "gpu listing" 0 "NVIDIA RTX 4090" "$CLI" gpus --available
 run_case "scaffold passthrough" 0 "FAKE_SCAFFOLD demo" "$CLI" scaffold demo

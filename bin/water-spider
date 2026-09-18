@@ -59,7 +59,12 @@
 #                        # on YOUR local machine. Prefers xpra (ssh transport,
 #                        # survives a dropped connection) if installed locally;
 #                        # falls back to raw X11 forwarding (--x11 forces it)
-#   water-spider snapshot <pod-id> [-o FILE]   # save model list + image provenance
+#   water-spider snapshot <pod-id> [-o FILE] [--scripts GLOB]
+#                       # manifest: models + image provenance + the pod's *.sh
+#                       # scripts (contents), live serve argv/env (secrets
+#                       # masked), GPU/driver, pip freeze (WATERS-023)
+#   water-spider restore-scripts <pod-id> <snapshot.json>
+#                       # write the carried scripts back at their paths (no run)
 #   water-spider teardown <pod-id> [--session-name NAME] [--pull PATH...]
 #   water-spider gpus [--available]        # `runpodctl gpu list`, filtered
 #   water-spider scaffold <name> [foreman-scaffold flags...]
@@ -413,6 +418,11 @@ $out"
     echo "    is a manual step until that gap is closed):"
     jq -r '.model_files[]? // empty' "$restore" 2>/dev/null | sed 's/^/    - /' || echo "    (couldn't parse $restore as a water-spider snapshot)"
     echo "    image this snapshot was taken from: $(jq -r '.image_provenance.base // .image_provenance.zorro_commit // "unknown"' "$restore" 2>/dev/null)"
+    if jq -e '.scripts | length > 0' "$restore" >/dev/null 2>&1; then
+      echo "    scripts carried (WATERS-023) — once ssh answers, write them back and run in order:"
+      echo "      water-spider restore-scripts $id $restore"
+      jq -r '.scripts | keys[]' "$restore" | sed 's/^/      - /'
+    fi
   fi
   echo "==> next: water-spider connect $id   (pod needs a minute to boot before SSH answers)"
 }
@@ -733,31 +743,92 @@ cmd_gui() {
 # not by copying bytes — a restore re-pulls them via `hf download`, which the
 # xet CDN path makes fast, rather than trying to move the file itself).
 cmd_snapshot() {
-  local id="${1:?usage: water-spider snapshot <pod-id> [-o FILE]}"; shift
+  local id="${1:?usage: water-spider snapshot <pod-id> [-o FILE] [--scripts GLOB ...]}"; shift
   local out="water-spider-snapshot-$id.json"
-  [ "${1:-}" = "-o" ] && out="$2"
+  # Scripts to carry: default /root/*.sh + /workspace/*.sh (the hand-rolled
+  # setup/pull/serve trio every provider pod so far has used). Their CONTENTS
+  # are embedded so a fresh pod can be replayed from the manifest alone.
+  local -a script_globs=("/root/*.sh" "/workspace/*.sh")
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -o) out="$2"; shift 2 ;;
+      --scripts) script_globs=("$2"); shift 2 ;;
+      *) die "snapshot: unexpected arg '$1'" ;;
+    esac
+  done
   local info hp host port
   info="$(rp_json ssh info "$id")"
   hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; port="${hp##*:}"
   if [ -z "$host" ] || [ -z "$port" ]; then
     die "could not resolve pod host/port (see: water-spider connect $id)"
   fi
+  local rssh=(ssh -p "$port" -i "$SSH_KEY" "root@$host")
 
-  echo "==> collecting manifest from $id (NOT live-tested this session)"
+  echo "==> collecting manifest from $id"
+  # The pod is NOT assumed to have jq (the RunPod pytorch image doesn't):
+  # remote commands emit plain lines, all JSON shaping happens locally.
   local models provenance
-  models="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" \
-    'ls "${ZORRO_MODELS_DIR:-/workspace/scratch/models}" 2>/dev/null | jq -R -s "split(\"\n\") | map(select(length>0))"' \
-    2>/dev/null || echo '[]')"
-  provenance="$(ssh -p "$port" -i "$SSH_KEY" "root@$host" 'cat /etc/zorro-image.json 2>/dev/null || echo "{}"')"
+  models="$("${rssh[@]}" 'ls "${ZORRO_MODELS_DIR:-/workspace/scratch/models}" /workspace/models 2>/dev/null | grep -v ":$"' 2>/dev/null | jq -R -s 'split("\n") | map(select(length>0)) | unique' || echo '[]')"
+  provenance="$("${rssh[@]}" 'cat /etc/zorro-image.json 2>/dev/null || echo "{}"' 2>/dev/null || echo '{}')"
+
+  # ── Config / env / script layer (added WATERS-023) ──────────────────────
+  # What the model list can't tell you: how the pod was built and launched.
+  #   scripts   — path → contents of every matching *.sh (the replay unit)
+  #   serve     — the live server process argv and its env (secrets masked:
+  #               any var whose name contains TOKEN/KEY/SECRET/PASSWORD)
+  #   runtime   — GPU, driver, python package versions (`pip freeze`)
+  local scripts='{}' serve_argv serve_env pip gpu osrel path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    # -n: the inner ssh must not eat the loop's stdin (the path list).
+    scripts="$(jq --arg p "$path" --rawfile c <("${rssh[@]}" -n "cat '$path'") '. + {($p): $c}' <<<"$scripts")"
+  done < <("${rssh[@]}" "ls ${script_globs[*]} 2>/dev/null" 2>/dev/null || true)
+  serve_argv="$("${rssh[@]}" 'ps -eo args | grep -E "(vllm|llama-server|zorro|pf) (serve|--)" | grep -v grep | head -1' 2>/dev/null || true)"
+  serve_env="$("${rssh[@]}" 'p=$(pgrep -f "(vllm|llama-server|zorro|pf) (serve|--)" | head -1); [ -n "$p" ] && tr "\0" "\n" < /proc/$p/environ | grep -E "^(VLLM_|HF_|CUDA_|TORCH|PATH=|LD_LIBRARY_PATH=|OMP_)"' 2>/dev/null \
+    | sed -E 's/^([^=]*(TOKEN|KEY|SECRET|PASSWORD)[^=]*)=.*/\1=[masked]/' | jq -R -s 'split("\n") | map(select(length>0))' || echo '[]')"
+  pip="$("${rssh[@]}" 'pip freeze 2>/dev/null' 2>/dev/null | jq -R -s 'split("\n") | map(select(length>0))' || echo '[]')"
+  gpu="$("${rssh[@]}" 'nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null | head -1' 2>/dev/null || true)"
+  osrel="$("${rssh[@]}" '. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"' 2>/dev/null || true)"
+
   jq -n --argjson models "$models" --argjson provenance "$provenance" --arg pod "$id" \
-    '{pod_id: $pod, image_provenance: $provenance, model_files: $models,
-      note: "manifest only — re-provisions by filename via hf download, does not carry bytes"}' \
+    --argjson scripts "$scripts" --arg serve_argv "$serve_argv" --argjson serve_env "$serve_env" \
+    --argjson pip "$pip" --arg gpu "$gpu" --arg os "$osrel" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{pod_id: $pod, taken_at: $ts, image_provenance: $provenance, model_files: $models,
+      scripts: $scripts, serve: {argv: $serve_argv, env: $serve_env},
+      runtime: {gpu: $gpu, os: $os, pip_freeze: $pip},
+      note: "model bytes are NOT carried — re-pull by name; scripts ARE carried verbatim (secrets in env are masked; scripts that read a token from a file keep reading it from that file)"}' \
     > "$out"
   echo "==> wrote $out"
-  echo "==> replay on a fresh pod (once running): print the model list and re-pull each"
-  echo "    by name — this tool doesn't know which HF repo each file came from, so"
-  echo "    restoring is a starting checklist, not a fully automated step yet:"
-  jq -r '.model_files[]' "$out" 2>/dev/null | sed 's/^/    - /'
+  echo "    scripts:   $(jq -r '.scripts | keys | join(", ")' "$out")"
+  echo "    serve:     $(jq -r '.serve.argv | if . == "" then "(no server process found)" else .[0:100] end' "$out")"
+  echo "    runtime:   $(jq -r '.runtime.gpu' "$out") · $(jq -r '.runtime.pip_freeze | length' "$out") packages"
+  echo "==> replay on a fresh pod: water-spider create --restore $out  (scripts are written to"
+  echo "    the pod at their original paths; run them in setup → pull → serve order yourself)"
+  jq -r '.model_files[]' "$out" 2>/dev/null | sed 's/^/    - model: /'
+}
+
+# ---- restore-scripts (WATERS-023) ------------------------------------------
+# Write the scripts a snapshot carries back onto a running pod at their original
+# paths (chmod +x). Does NOT run them: setup → pull → serve is the operator's
+# call, and the pull needs a token the manifest deliberately doesn't carry.
+cmd_restore_scripts() {
+  local id="${1:?usage: water-spider restore-scripts <pod-id> <snapshot.json>}"
+  local snap="${2:?usage: water-spider restore-scripts <pod-id> <snapshot.json>}"
+  [ -f "$snap" ] || die "restore-scripts: file not found: $snap"
+  local info hp host port
+  info="$(rp_json ssh info "$id")"
+  hp="$(ws_resolve_host_port "$info")"; host="${hp%%:*}"; port="${hp##*:}"
+  [ -n "$host" ] && [ -n "$port" ] || die "could not resolve pod host/port (see: water-spider connect $id)"
+  local n=0 path
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    jq -r --arg p "$path" '.scripts[$p]' "$snap" | \
+      ssh -p "$port" -i "$SSH_KEY" "root@$host" "mkdir -p \"\$(dirname '$path')\" && cat > '$path' && chmod +x '$path'" \
+      || die "restore-scripts: failed writing $path"
+    echo "  wrote $path"; n=$((n+1))
+  done < <(jq -r '.scripts | keys[]' "$snap")
+  echo "==> $n script(s) restored on $id. Run them yourself in setup → pull → serve order;"
+  echo "    tokens go over stdin (e.g. secure-env get HUGGING_FACE | ssh ... 'umask 077; cat > /root/.hf_token')."
 }
 
 # ---- teardown --------------------------------------------------------------
@@ -859,6 +930,7 @@ case "$sub" in
   recipe)    cmd_recipe "$@" ;;
   gui)       cmd_gui "$@" ;;
   snapshot)  cmd_snapshot "$@" ;;
+  restore-scripts) cmd_restore_scripts "$@" ;;
   teardown)  cmd_teardown "$@" ;;
   gpus)      cmd_gpus "$@" ;;
   scaffold)  cmd_scaffold "$@" ;;
