@@ -7,6 +7,8 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+- `snapshot` now carries the pod's `*.sh` scripts (contents), the live serve process argv + env (secrets masked), GPU/OS and `pip freeze`; remote side needs no `jq`. New `restore-scripts <pod> <snapshot.json>` writes them back; `create --restore` points at it. (WATERS-023)
+
 ## [0.6.4] - 2026-08-30
 
 - file WATERS-022: bake wsforge-style agent confinement into the pod images (#6)

@@ -11,6 +11,15 @@ fi
 
 case " $* " in
   *"zorro-image.json"*) printf '{"base":"test-image"}\n' ;;
-  *"ZORRO_MODELS_DIR"*) printf '["test.gguf"]\n' ;;
+  *"ZORRO_MODELS_DIR"*) printf 'test.gguf\n' ;;
+  # WATERS-023 snapshot: scripts map, serve argv/env, pip freeze, gpu, os
+  *"ls /root/*.sh"*) printf '/root/serve.sh\n' ;;
+  *"cat '/root/serve.sh'"*) printf '#!/bin/bash\nvllm serve /workspace/models/m --port 8000\n' ;;
+  *"/proc/"*"environ"*) printf 'VLLM_USE_FLASHINFER_SAMPLER=0\nHF_TOKEN=hf_abcdefghijklmnopqrstuvwxyz0123\n' ;;
+  *"ps -eo args"*) printf 'vllm serve /workspace/models/m --port 8000\n' ;;
+  *"pip freeze"*) printf 'vllm==0.29.0\ntorch==2.13.0\n' ;;
+  *"nvidia-smi"*) printf 'NVIDIA RTX 6000 Ada Generation, 49140 MiB, 580.159.04\n' ;;
+  *"os-release"*) printf 'Ubuntu 22.04.5 LTS\n' ;;
+  *"chmod +x"*) cat >/dev/null; printf 'FAKE_SSH_WROTE\n' ;;
   *) printf 'FAKE_SSH_OK\n' ;;
 esac
