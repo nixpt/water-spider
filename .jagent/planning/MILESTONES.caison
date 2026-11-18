@@ -1,0 +1,105 @@
+@caison { version: "1.0" }
+# water-spider milestones. Written by ann (borderland lane) on 2026-11-18 from .jagent/planning ROADMAP.md, STATE.md,
+# the 22 ticket files, tags v0.1.0..v0.6.4 and merged PRs #1-#6. Milestone ids and ticket grouping follow ROADMAP.md;
+# M6 is added for WATERS-022 (filed in PR #6, absent from ROADMAP.md).
+
+schema: "milestones/1"
+
+project: {
+  name: "water-spider"
+  kind: "repo"
+  lifecycle: "shipped" ~0.6 @verified { at: "2026-11-18", by: "ann" }
+  lifecycle_since: "2026-08-16"
+  home: "zorro"
+  ticket_prefix: "WATERS"
+  root: "f357de863e6f88450a5be8c724beeb91388ba95d"
+  summary: "standalone cost-safe RunPod lifecycle CLI (create, tunnel, serve, verified teardown) with GHCR images and an MCP surface; tags v0.1.0..v0.6.4 (VERSION 0.6.4); last commit 2026-08-30; WATERS-003/017/021/022 open"
+  north_star: "a standalone, cost-safe RunPod lifecycle CLI that lets a local harness provision, use and reliably tear down GPU pods, with every non-billable behavior under deterministic tests and live-data paths backed by dated evidence"
+  stewards: ["arisu", "ann"]
+  evidence: {
+    default_branch: "main"
+  }
+}
+
+milestones: [
+  {
+    id: "M0"
+    title: "Core health: ShellCheck-clean CLI, command harness, safe GraphQL input"
+    status: "done" @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-001", "WATERS-002", "WATERS-004"]
+    done_when: [
+      { claim: "M0 tickets Done", check: { kind: "tickets", status: "Done" } },
+    ]
+  },
+  {
+    id: "M2"
+    title: "Public release: version surface, tags, release gitops, GHCR images for all variants"
+    status: "done" @verified { at: "2026-11-18", by: "ann" }
+    done_at: "2026-08-30"
+    version: "0.6.4"
+    tickets: ["WATERS-005", "WATERS-010", "WATERS-018"]
+    depends_on: ["M0"]
+    done_when: [
+      { claim: "release tags exist", check: { kind: "tag", pattern: "v0.6.*" } },
+      { claim: "M2 tickets Done", check: { kind: "tickets", status: "Done" } },
+    ]
+    notes: "Ticket files for WATERS-011/012/013 (brand assets, Docker Hub docs, release test) are also Done and not in ROADMAP.md."
+  },
+  {
+    id: "M3"
+    title: "Planning hygiene: metadata, contribution conventions, dejavue, docs, v2 operator guide"
+    status: "done" @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-006", "WATERS-007", "WATERS-008", "WATERS-009", "WATERS-019"]
+    depends_on: ["M0"]
+    done_when: [
+      { claim: "M3 tickets Done", check: { kind: "tickets", status: "Done" } },
+    ]
+  },
+  {
+    id: "M1"
+    title: "Operational validation: transfer, recipe wrapper, GUI and snapshot workflows on live RunPod"
+    status: "active" ~0.4 @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-003"]
+    depends_on: ["M0"]
+    done_when: [
+      { claim: "WATERS-003 Done", check: { kind: "tickets", status: "Done" } },
+    ]
+    notes: "ROADMAP.md: core create/tunnel/inference/teardown path proven live; four peripheral workflows pending. WATERS-003 is Backlog and nothing has moved since 2026-08-30, so active is a low-confidence reading of the roadmap's 'current phase'. Needs billable RunPod time."
+  },
+  {
+    id: "M4"
+    title: "MCP agent surface: read-only profiles done; enforceable leases before create/teardown tools pending"
+    status: "planned" ~0.6 @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-016", "WATERS-017"]
+    depends_on: ["M2"]
+    done_when: [
+      { claim: "WATERS-016 read-only surface Done", check: { kind: "tickets", ids: ["WATERS-016"], status: "Done" } },
+      { claim: "WATERS-017 leases Done", check: { kind: "tickets", ids: ["WATERS-017"], status: "Done" } },
+    ]
+    notes: "Half done: WATERS-016 is Done, WATERS-017 is Ready. Marked planned because the remaining half is the milestone's point (billable tools)."
+  },
+  {
+    id: "M5"
+    title: "Ephemeral local agents: Mayfly + OpenCode integration done; Ampere (arch 8.6) image and GPU agent qualification pending"
+    status: "planned" ~0.6 @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-020", "WATERS-021"]
+    depends_on: ["M4"]
+    done_when: [
+      { claim: "WATERS-020 integration Done", check: { kind: "tickets", ids: ["WATERS-020"], status: "Done" } },
+      { claim: "WATERS-021 Ampere qualification Done", check: { kind: "tickets", ids: ["WATERS-021"], status: "Done" } },
+    ]
+    notes: "Half done: WATERS-020 Done (PR #1), WATERS-021 Ready."
+  },
+  {
+    id: "M6"
+    title: "wsforge-style agent confinement baked into the pod images"
+    status: "planned" @verified { at: "2026-11-18", by: "ann" }
+    tickets: ["WATERS-022"]
+    depends_on: ["M5"]
+    done_when: [
+      { claim: "ticket filed in PR #6", check: { kind: "merged", pr: "6" } },
+      { claim: "WATERS-022 Done", check: { kind: "tickets", status: "Done" } },
+    ]
+    notes: "Not in ROADMAP.md; the ticket (Backlog) was filed by PR #6 on 2026-08-30."
+  },
+]
