@@ -94,3 +94,14 @@ matters more than the specific model, run `qwen36-35b-a3b` with MTP.
 - `pod-tunnel`/`water-spider tunnel` used no ServerAlive options; a stalled forward hung without dying (fixed on this branch).
 - Bench prompts of random `wordNNN` tokens tokenise at ~3.1 tokens per word; calibrate with `timings.prompt_n`.
 - The host's `nvidia-smi`, `/proc` and `free` show 96 vCPU / 503 GB; the cgroup gives 7.65 CPUs / 50 GB.
+
+## Quantizing on the pod (bro-aware Qwen3.6-35B-A3B, same session)
+
+Source: the MTP repo's Q8_0 (the plain repo's Q8 has no MTP layers). Steps and exact commands are in
+`/workspace/data/qwen36-35b-a3b-bro/NOTE.md` (zorro). Pod-side lessons:
+- `llama-imatrix ... --chunks 90 --no-ppl`: 90 x 4096 tokens of bro traces took 11 min on the A6000 (without `--no-ppl` it was ~20% slower and printed per-chunk PPL).
+- The pod's 7.65-CPU cgroup, not the GPU, sets quantization time. `IQ3_XXS` with an imatrix ran at ~1.5 min per layer (~60 min total); `Q3_K_S` took 4.3 min for the same 37.8 GB source, `Q4_K_M` ~15 min under contention. Use K-quants when time-boxed.
+- Keep the MTP block: `--tensor-type "blk\.40\.(attn_.*|ffn_.*|nextn\.eh_proj)\.weight=q8_0"` keeps `blk.40.nextn.*`; without an imatrix entry for that block an IQ type would otherwise fail or degrade it.
+- Quants with MTP on the A6000: Q3_K_S 205.8 tok/s (acceptance 74%), Q4_K_M 204.5 tok/s (79%), against 22.9 tok/s for the dense 27B without MTP.
+- `hf upload` to a private repo fails with "Private storage limit reached" once the account quota is hit; the first 16 GB went through, the second 22 GB did not.
+- `pkill -f <pattern>` from a shell whose own command line contains the pattern kills that shell; use `ps | grep "[p]attern" | awk | xargs kill`.
