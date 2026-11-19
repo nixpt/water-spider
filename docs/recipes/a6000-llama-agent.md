@@ -37,4 +37,46 @@ by deleting a finished GGUF and re-pulling the next (xet pull: 25-36 GB in
 
 ## Results
 
-RESULTS_PLACEHOLDER
+Prompt token counts are actual `prompt_n`: short = 641, "50k" = 49,837, "100k" = 99,596.
+`pp` = prefill tok/s, `tg` = decode tok/s, one request at a time unless noted. All rows: `-ngl 999 --jinja -fa on -t 8 -tb 8`.
+
+### qwen38-27b-q8 (Qwen3.8-27B Q8_0, 29 GB, GDN hybrid)
+
+| config | VRAM MiB | short pp/tg | 50k pp/tg | 100k pp/tg | code tg | 2 concurrent, agg tg |
+|---|---|---|---|---|---|---|
+| np1 -c 262144 q8_0 KV | 36550 | 1092 / 22.97 | 1281 / 19.82 | 1030 / 17.34 | 22.9 | (serialised) |
+| np2 -c 262144 q8_0 KV (served to tenzo, mtp off) | 36572 | 1085 / 22.85 | 1254 / 19.79 | 1019 / 17.34 | 22.9 | 42.6 |
+| np2 -c 262144 q8_0 KV + MTP n-max 3 | 39174 | 1070 / 52.1 | 1200 / 35.05 | 968 / 33.94 | 53.1 | 88.9 |
+| np2 -c 131072 f16 KV | 35008 | 1101 / 23.0 | 1268 / 20.6 | does not fit (65k/slot) | 22.9 | 42.8 |
+| np2 -c 262144 q8_0 KV -b 4096 -ub 1024 | 36808 | 1267 / 22.8 | 1315 / 19.7 | 1083 / 17.3 | 22.9 | 42.8 |
+
+Findings:
+- The Q8_0 GGUF ships the MTP head (`blk.64.nextn.*`); `--spec-type draft-mtp --spec-draft-n-max 3` works on the same file.
+  Acceptance 63-71% (173/245 on a code prompt, mean accepted length ~3.0). Decode is 2.3x faster on short context and
+  1.8-2.0x at 50-100k, for +2.6 GB VRAM and ~4% less prefill. Use it for agent runs.
+- q8_0 KV costs no speed against f16 and halves KV memory; the hybrid model's KV is small anyway, so 262144 ctx fits with 12 GB spare.
+- `-b 4096 -ub 1024` raises prefill 5-17% at +0.2 GB.
+- The served M1 ran WITHOUT MTP and with default `-b/-ub`; mtp=off is recorded in the pilot EVENTS.log.
+- Live agent traffic (tenzo's sessions, 2 slots busy): prefill 860-1350 tok/s, decode 15-20 tok/s per slot.
+
+Winning flags: `-c 262144 -np 2 -ctk q8_0 -ctv q8_0 -fa on -t 8 -tb 8 -b 4096 -ub 1024 --spec-type draft-mtp --spec-draft-n-max 3 --jinja`.
+
+### qwen36-35b-a3b (Qwen3.6-35B-A3B Q8_0, 37.8 GB, MoE)
+
+Use `unsloth/Qwen3.6-35B-A3B-MTP-GGUF`: the plain unsloth Q8_0 has no MTP layers and llama-server refuses
+`draft-mtp` on it ("context type MTP requested but model doesn't contain MTP layers").
+Served with the winning M1 flags: VRAM 40,818 MiB at 262144 ctx / 2 slots (131072 per slot);
+smoke decode 170.7 tok/s with 77% MTP acceptance (178/230, code prompt).
+
+### gemma4-31b (gemma-4-31B-it Q6_K, 25 GB)
+
+No `nextn`/MTP tensors in the GGUF header, so mtp=off. See the table rows below if measured.
+
+## Gotchas hit on this pod
+
+- Port 8081 on the pod is RunPod's nginx: a health check passes and every POST returns `405 Not Allowed`. Serve on 8080/8090.
+- `water-spider create` without a GraphQL-only flag falls back to runpodctl 2.1.9, which refuses; `--min-download 1` is a harmless way to force GraphQL.
+- Community A6000 had "no longer any instances"; SECURE worked at $0.704/hr.
+- `pod-tunnel`/`water-spider tunnel` used no ServerAlive options; a stalled forward hung without dying (fixed on this branch).
+- Bench prompts of random `wordNNN` tokens tokenise at ~3.1 tokens per word; calibrate with `timings.prompt_n`.
+- The host's `nvidia-smi`, `/proc` and `free` show 96 vCPU / 503 GB; the cgroup gives 7.65 CPUs / 50 GB.
