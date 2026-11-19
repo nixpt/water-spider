@@ -16,6 +16,7 @@ full details on each `WATERS-N` ID.
 ## P0 — Live breakage
 
 - [ ] [WATERS-024](tickets/WATERS-024-runpod-rest-host-gone.md) — rest.runpod.io is gone: move pod reads and terminate to GraphQL
+- [ ] [WATERS-026](tickets/WATERS-026-graphql-default-create.md) — Route the default `create` through GraphQL (no-op `--min-download 1` workaround today)
 
 ## P1 — Release Readiness
 
