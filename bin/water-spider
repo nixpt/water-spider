@@ -211,8 +211,10 @@ ws_api_key() {
 ws_gql() {
   local query="$1" key resp
   key="$(ws_api_key)" || return 1
-  resp="$(curl -sS --max-time 30 -X POST "https://api.runpod.io/graphql" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+  # The key goes in via a curl config on stdin (-K -), never on argv, so it
+  # is not visible in ps or /proc/*/cmdline.
+  resp="$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -sS --max-time 30 -K - -X POST "https://api.runpod.io/graphql" \
+    -H "Content-Type: application/json" \
     -d "$(jq -n --arg q "$query" '{query: $q}')")" \
     || { echo "GraphQL request failed (network?)" >&2; return 1; }
   if ! printf '%s' "$resp" | jq -e 'type=="object"' >/dev/null 2>&1; then
@@ -316,8 +318,8 @@ ws_create_via_graphql() {
   local query="mutation { podFindAndDeployOnDemand(input: { $joined }) { id imageName machineId machine { podHostId } } }"
   local key; key="$(ws_api_key)"
   local resp
-  resp="$(curl -sS -X POST "https://api.runpod.io/graphql" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+  resp="$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -sS -K - -X POST "https://api.runpod.io/graphql" \
+    -H "Content-Type: application/json" \
     -d "$(jq -n --arg q "$query" '{query: $q}')")" || die "GraphQL request failed (network?)"
   if echo "$resp" | jq -e '.errors' >/dev/null 2>&1; then
     die "GraphQL create failed: $(echo "$resp" | jq -r '.errors[0].message // .errors' 2>/dev/null)"

@@ -101,6 +101,10 @@ run_case "ledger replay refuses when listing fails" 1 "refusing to create" env F
 CURL_LOG="$TEST_TMP/curl.log"; : > "$CURL_LOG"
 run_case "teardown terminates via GraphQL then verifies" 0 "confirmed gone" run_with_input_mode y empty-list env FAKE_CURL_LOG="$CURL_LOG" "$CLI" teardown pod-1
 if grep -q 'podTerminate' "$CURL_LOG" && grep -q 'podId: "pod-1"' "$CURL_LOG" && [ "$(grep -c myself "$CURL_LOG")" -ge 1 ]; then pass "teardown issued podTerminate + a fresh listing"; else fail "teardown issued podTerminate + a fresh listing" "$(cat "$CURL_LOG")"; fi
+# API key must not appear on curl's argv; the fake exits 99 if it does, so the
+# GraphQL cases above (list/create) passing proves it. Check the guard itself works:
+run_case "fake curl rejects Bearer on argv (guard self-test)" 99 "Bearer token found on argv" curl -H "Authorization: Bearer x" https://example.invalid
+run_case "GraphQL create passes key via stdin, not argv" 0 "created pod pod-new" "$CLI" create --image image --gpu gpu --country US
 run_case "invalid pod id rejected" 1 "invalid pod id" "$CLI" get 'x"y'
 
 printf '\n%d passed; %d failed\n' "$passed" "$failed"

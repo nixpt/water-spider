@@ -3,6 +3,15 @@ set -euo pipefail
 
 payload=""
 args="$*"
+# The API key must never be on argv (visible in ps): reject any Bearer in argv.
+for a in "$@"; do
+  case "$a" in *Bearer*) echo "fake curl: Bearer token found on argv" >&2; exit 99 ;; esac
+done
+# Auth must arrive as a curl config on stdin (-K -).
+if [[ " $* " == *" -K - "* ]]; then
+  stdin_cfg="$(cat)"
+  [[ "$stdin_cfg" == *"Authorization: Bearer "* ]] || { echo "fake curl: no auth header on stdin" >&2; exit 98; }
+fi
 while [ $# -gt 0 ]; do
   if [ "$1" = "-d" ]; then
     payload="$2"
