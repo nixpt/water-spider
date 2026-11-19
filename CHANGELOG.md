@@ -7,6 +7,14 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-19
+
+- Merge pull request #10 from nixpt/agent/ann/WATERS-024
+- fix: pass RunPod API key to curl via stdin config, not argv (WATERS-024)
+- fix: move pod list/get/terminate/verify to GraphQL; rest.runpod.io is gone (WATERS-024)
+
+
+
 ## [0.6.4] - 2026-08-30
 
 - file WATERS-022: bake wsforge-style agent confinement into the pod images (#6)
