@@ -198,6 +198,70 @@ ws_api_key() {
   grep -oP "(?<=apikey = ')[^']+" "$cfg" 2>/dev/null || grep -oP '(?<=apikey = ")[^"]+' "$cfg"
 }
 
+# ---- pod reads/terminate via GraphQL (WATERS-024) ---------------------------
+# runpodctl <=2.x REST calls (`pod list|get|delete|create`) go to
+# rest.runpod.io, which no longer resolves (REST moved to api.runpod.io/v2;
+# runpodctl >=3.1.1 follows it, 2.1.9 does not). GraphQL on api.runpod.io is
+# stable and is what `runpodctl user|gpu list|ssh info` already use, so pod
+# reads and terminate go straight to GraphQL here. Chosen over falling back to
+# `runpodctl pod list` because that fallback would depend on whichever
+# runpodctl happens to be installed. Every helper RETURNS non-zero (never
+# "empty success") on transport, HTTP-level, or GraphQL errors so callers can
+# fail closed.
+ws_gql() {
+  local query="$1" key resp
+  key="$(ws_api_key)" || return 1
+  resp="$(curl -sS --max-time 30 -X POST "https://api.runpod.io/graphql" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+    -d "$(jq -n --arg q "$query" '{query: $q}')")" \
+    || { echo "GraphQL request failed (network?)" >&2; return 1; }
+  if ! printf '%s' "$resp" | jq -e 'type=="object"' >/dev/null 2>&1; then
+    echo "GraphQL returned a non-JSON response" >&2; return 1
+  fi
+  if printf '%s' "$resp" | jq -e '.errors' >/dev/null 2>&1; then
+    echo "GraphQL error: $(printf '%s' "$resp" | jq -r '.errors[0].message // .errors' 2>/dev/null)" >&2; return 1
+  fi
+  printf '%s' "$resp"
+}
+
+# Emits a JSON array of pods (same field names the jq filters expect:
+# id, name, desiredStatus, costPerHr, machine.gpuDisplayName). `[]` means the
+# query SUCCEEDED and the account has no pods; any failure returns non-zero.
+ws_pods_json() {
+  local resp
+  resp="$(ws_gql '{ myself { pods { id name desiredStatus costPerHr gpuCount imageName machine { gpuDisplayName podHostId } } } }')" || return 1
+  printf '%s' "$resp" | jq -e '.data.myself.pods | if type=="array" then . else error("no pod list") end' 2>/dev/null \
+    || { echo "GraphQL pod listing had no .data.myself.pods array" >&2; return 1; }
+}
+
+ws_pod_json() {
+  local id="$1" resp
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "invalid pod id: $id" >&2; return 1; }
+  resp="$(ws_gql "{ pod(input: {podId: \"$id\"}) { id name desiredStatus costPerHr gpuCount imageName vcpuCount memoryInGb containerDiskInGb volumeInGb machine { gpuDisplayName podHostId } runtime { uptimeInSeconds ports { ip isIpPublic privatePort publicPort type } } } }")" || return 1
+  printf '%s' "$resp" | jq -e '.data.pod | select(. != null)' 2>/dev/null || { echo "pod $id not found" >&2; return 1; }
+}
+
+# podTerminate returns Void; success of the REQUEST says nothing about the pod
+# being gone — teardown always re-queries ws_pods_json afterwards.
+ws_pod_terminate() {
+  local id="$1"
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "invalid pod id: $id" >&2; return 1; }
+  ws_gql "mutation { podTerminate(input: {podId: \"$id\"}) }" >/dev/null
+}
+
+# runpodctl < 3.1.1 sends `pod create|list|get|delete` to the dead
+# rest.runpod.io. Only the default (non-GraphQL) create still uses `pod create`,
+# so gate it: refuse with a clear message (no pod is created) instead of
+# failing mid-way with a DNS error.
+ws_require_rest_capable_runpodctl() {
+  local v
+  v="$(runpodctl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+  [ -n "$v" ] || die "create: could not read 'runpodctl version' — refusing (need >= 3.1.1 for 'pod create')"
+  if [ "$(printf '%s\n3.1.1\n' "$v" | sort -V | head -1)" != "3.1.1" ]; then
+    die "create: runpodctl $v talks to the retired rest.runpod.io; 'pod create' needs runpodctl >= 3.1.1 (upgrade it), or pass a GraphQL-path flag (--country/--data-center/--cuda-versions/--min-download/--min-upload/--registry-auth-id). Nothing was created."
+  fi
+}
+
 ws_gql_string() {
   jq -Rnr --arg value "$1" '$value | @json'
 }
@@ -334,10 +398,15 @@ cmd_create() {
     # attempted at all"): a prior successful create already exists.
     if [ -f "$ledger" ]; then
       local prior_id; prior_id="$(jq -r '.pod_id // empty' "$ledger" 2>/dev/null)"
-      if [ -n "$prior_id" ] && runpodctl pod list -o json 2>/dev/null | jq -e --arg id "$prior_id" '.[] | select(.id==$id)' >/dev/null 2>&1; then
-        echo "==> idempotent replay: key '$idem_key' already created $prior_id — returning it, NOT creating a new pod"
-        runpodctl pod list -o json | jq -r --arg id "$prior_id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // .status // "-")"'
-        return
+      if [ -n "$prior_id" ]; then
+        # Fail closed: if the listing errors we cannot tell a replay from a
+        # fresh create, and guessing "fresh" could bill a duplicate pod.
+        local pods_now; pods_now="$(ws_pods_json)" || die "create: cannot list pods to check the idempotency ledger — refusing to create (a blind create could duplicate $prior_id). Fix the API error above, then retry"
+        if printf '%s' "$pods_now" | jq -e --arg id "$prior_id" '.[] | select(.id==$id)' >/dev/null 2>&1; then
+          echo "==> idempotent replay: key '$idem_key' already created $prior_id — returning it, NOT creating a new pod"
+          printf '%s' "$pods_now" | jq -r --arg id "$prior_id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // "-")"'
+          return
+        fi
       fi
       echo "==> ledger has a stale entry for key '$idem_key' (pod no longer listed) — proceeding as a fresh create"
     fi
@@ -357,9 +426,12 @@ cmd_create() {
     # process won the race and already committed while we waited).
     if [ -f "$ledger" ]; then
       local prior_id2; prior_id2="$(jq -r '.pod_id // empty' "$ledger" 2>/dev/null)"
-      if [ -n "$prior_id2" ] && runpodctl pod list -o json 2>/dev/null | jq -e --arg id "$prior_id2" '.[] | select(.id==$id)' >/dev/null 2>&1; then
-        echo "==> idempotent replay (post-lock): another call already created $prior_id2 for key '$idem_key'"
-        return
+      if [ -n "$prior_id2" ]; then
+        local pods_now2; pods_now2="$(ws_pods_json)" || die "create: cannot list pods to re-check the idempotency ledger under the lock — refusing to create"
+        if printf '%s' "$pods_now2" | jq -e --arg id "$prior_id2" '.[] | select(.id==$id)' >/dev/null 2>&1; then
+          echo "==> idempotent replay (post-lock): another call already created $prior_id2 for key '$idem_key'"
+          return
+        fi
       fi
     fi
   fi
@@ -372,7 +444,11 @@ cmd_create() {
   # underlying single-attempt discipline stays, since the key only protects
   # against re-EXECUTING, not against a create call that's ambiguous by itself.)
   echo "==> pods before create:"
-  runpodctl pod list -o json | jq -r '.[] | "  \(.id)  \(.name // "-")  \(.desiredStatus // .status // "-")"' 2>/dev/null || echo "  (none)"
+  # Fail closed: an unreadable listing is NOT "no pods" — refuse to create.
+  local pods_before
+  pods_before="$(ws_pods_json)" || die "create: cannot list existing pods — refusing to create (cannot rule out a duplicate). Fix the API error above; do NOT blindly retry"
+  printf '%s' "$pods_before" | jq -r '.[] | "  \(.id)  \(.name // "-")  \(.desiredStatus // "-")"'
+  [ "$(printf '%s' "$pods_before" | jq 'length')" != "0" ] || echo "  (none)"
 
   local out
   if [ -n "$min_dl" ] || [ -n "$min_ul" ] || [ -n "$cuda_versions" ] || [ -n "$dc" ] || [ -n "$country" ] || [ -n "$registry_auth_id" ]; then
@@ -387,6 +463,7 @@ cmd_create() {
       "$disk" "$volume" "$cloud" "$ports" "$min_dl" "$min_ul" "$cuda_versions" "$dc" "$country" "$registry_auth_id")" \
       || die "GraphQL create failed — check output above, do NOT blindly retry"
   else
+    ws_require_rest_capable_runpodctl
     local args=(pod create --name "$name" --gpu-id "$gpu" --gpu-count "$gpu_count" \
       --ports "$ports" --container-disk-in-gb "$disk" --volume-in-gb "$volume" \
       --cloud-type "$cloud")
@@ -406,7 +483,13 @@ $out"
     echo "==> idempotency ledger written: $ledger (a retry with --idempotency-key '$idem_key' will now replay $id, never create a second pod)"
   fi
   echo "==> VERIFYING exactly one new pod exists (not a retry-duplicate):"
-  runpodctl pod list -o json | jq -r --arg id "$id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // .status // "-")"'
+  local pods_after
+  if pods_after="$(ws_pods_json)"; then
+    printf '%s' "$pods_after" | jq -r --arg id "$id" '.[] | select(.id==$id) | "  \(.id)  \(.name)  status=\(.desiredStatus // "-")"'
+    printf '%s' "$pods_after" | jq -e --arg id "$id" 'any(.[]; .id==$id)' >/dev/null || echo "⚠️  $id not in the listing yet — check 'water-spider list' before doing anything else (do NOT re-run create)"
+  else
+    echo "⚠️  could not verify the new pod: the post-create listing failed. $id was created and is BILLING — check 'water-spider list'; do NOT re-run create"
+  fi
   if [ -n "$restore" ]; then
     echo "==> --restore checklist (HONEST: this is a checklist, not full automation —"
     echo "    the snapshot only records filenames, not source HF repos, so re-pulling"
@@ -420,11 +503,13 @@ $out"
 # ---- list / status / get ------------------------------------------------
 cmd_list() {
   local rows
-  rows="$(runpodctl pod list -o json | jq -r '
+  local pods
+  pods="$(ws_pods_json)" || die "could not list pods (see error above)"
+  rows="$(printf '%s' "$pods" | jq -r '
     (["ID","NAME","GPU","STATUS","COST/HR"] | @tsv),
     (.[] | [.id, (.name // "-"), (.machine.gpuDisplayName // .gpuTypeId // "-"),
             (.desiredStatus // .status // "-"), (.costPerHr // "-" | tostring)] | @tsv)
-  ')" || { echo "(jq failed — raw:)"; runpodctl pod list; return; }
+  ')" || die "could not format the pod listing"
   echo "$rows" | column -t -s $'\t'
 }
 
@@ -433,7 +518,7 @@ cmd_status() {
   runpodctl user -o json | jq -r '"  balance: $\(.clientBalance | tostring)   spend/hr NOW: $\(.currentSpendPerHr)   spend limit: $\(.spendLimit)"'
   echo "== pods =="
   local n
-  n="$(runpodctl pod list -o json | jq 'length')" || die "runpodctl pod list failed"
+  n="$(ws_pods_json | jq 'length')" || die "could not list pods (see error above)"
   if [ "$n" = "0" ]; then
     echo "  none — nothing billing right now."
   else
@@ -444,7 +529,8 @@ cmd_status() {
 
 cmd_get() {
   local id="${1:?usage: water-spider get <pod-id>}"
-  rp_json pod get "$id" | jq .
+  local pod; pod="$(ws_pod_json "$id")" || die "get $id failed (see above)"
+  printf '%s\n' "$pod" | jq .
 }
 
 # ---- connect -------------------------------------------------------------
@@ -795,7 +881,9 @@ cmd_teardown() {
   esac
 
   echo "==> deleting $id"
-  runpodctl pod delete "$id" -o json | jq . 2>/dev/null || true
+  # A failed terminate REQUEST is not fatal here: the fresh listing below is
+  # the only thing that decides "gone" vs "still billing" vs UNKNOWN.
+  ws_pod_terminate "$id" || echo "⚠️  terminate request reported an error (above) — verifying the real state anyway"
 
   echo "==> VERIFYING it's actually gone (every idle hour bills):"
   sleep 2
@@ -804,14 +892,16 @@ cmd_teardown() {
   # call itself fails, that must read as "UNKNOWN, go check by hand", never
   # as silent success (the set -e assignment trap this file already hit
   # once would turn a transient network blip into a false all-clear here).
-  if ! still="$(runpodctl pod list -o json | jq -r --arg id "$id" '.[] | select(.id==$id) | .id')"; then
-    echo "⚠️  could not verify — 'runpodctl pod list' itself failed. UNKNOWN"
-    echo "    whether $id is really gone. Check manually: runpodctl pod get $id"
+  local fresh
+  if ! fresh="$(ws_pods_json)"; then
+    echo "⚠️  could not verify — the pod listing query itself failed. UNKNOWN"
+    echo "    whether $id is really gone. Check manually: water-spider get $id"
     exit 1
   fi
+  still="$(printf '%s' "$fresh" | jq -r --arg id "$id" '.[] | select(.id==$id) | .id')" || { echo "⚠️  could not parse the listing. UNKNOWN whether $id is gone."; exit 1; }
   if [ -n "$still" ]; then
     echo "⚠️  $id STILL LISTED — delete may not have taken. Re-check manually:"
-    echo "    runpodctl pod get $id"
+    echo "    water-spider get $id"
     exit 1
   fi
   echo "==> confirmed gone. Remember: stop any local watcher polling this pod"
