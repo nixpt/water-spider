@@ -10,6 +10,7 @@ trap 'rm -rf "$TEST_TMP"' EXIT
 export HOME="$TEST_TMP/home"
 export XDG_CACHE_HOME="$TEST_TMP/cache"
 export PATH="$ROOT/tests/fakes:$PATH"
+export RUNPOD_API_KEY=test-key
 mkdir -p "$HOME/.ssh" "$XDG_CACHE_HOME"
 : > "$HOME/.ssh/runpod"
 
@@ -69,13 +70,42 @@ run_case "invalid cloud enum" 1 "--cloud must be" "$CLI" create --image image --
 run_case "invalid country" 1 "--country must be" env RUNPOD_API_KEY=test "$CLI" create --image image --gpu gpu --country usa
 
 run_case "malformed JSON fails visibly" 5 "jq: parse error" env FAKE_RUNPOD_MODE=malformed "$CLI" create --image example/image:latest --gpu gpu
-run_case "API failure is surfaced" 1 "runpodctl pod get pod-1 failed" env FAKE_RUNPOD_MODE=api-fail "$CLI" get pod-1
+run_case "API failure is surfaced" 1 "GraphQL request failed" env FAKE_RUNPOD_MODE=api-fail "$CLI" get pod-1
+run_case "get of a missing pod fails" 1 "not found" env FAKE_RUNPOD_MODE=get-missing "$CLI" get pod-x
+run_case "list via GraphQL shows GPU + cost" 0 "NVIDIA RTX 4090" "$CLI" list
+run_case "list failure is an error, not empty" 1 "could not list pods" env FAKE_RUNPOD_MODE=list-fail "$CLI" list
+run_case "list GraphQL error surfaced" 1 "GraphQL error: not authorized" env FAKE_RUNPOD_MODE=list-graphql-error "$CLI" list
+run_case "list non-JSON response fails" 1 "non-JSON" env FAKE_RUNPOD_MODE=list-garbage "$CLI" list
+run_case "status with no pods" 0 "nothing billing" env FAKE_RUNPOD_MODE=empty-list "$CLI" status
+run_case "status with pods warns" 0 "2 pod(s) active" "$CLI" status
+run_case "status list failure is not 'none'" 1 "could not list pods" env FAKE_RUNPOD_MODE=list-fail "$CLI" status
+run_case "teardown still-listed is failure" 1 "STILL LISTED" run_with_input_mode y ok "$CLI" teardown pod-1
+run_case "teardown terminate error then still listed" 1 "STILL LISTED" run_with_input_mode y terminate-fail "$CLI" teardown pod-1
+run_case "teardown verify query fails => UNKNOWN" 1 "UNKNOWN" run_with_input_mode y list-fail "$CLI" teardown pod-1
+run_case "teardown unparseable verify => UNKNOWN" 1 "UNKNOWN" run_with_input_mode y list-garbage "$CLI" teardown pod-1
+run_case "create refuses when listing fails" 1 "refusing to create" env FAKE_RUNPOD_MODE=list-fail "$CLI" create --image example/image:latest --gpu gpu
+run_case "create refuses on listing GraphQL error" 1 "refusing to create" env FAKE_RUNPOD_MODE=list-graphql-error "$CLI" create --image example/image:latest --gpu gpu
+run_case "GraphQL-path create refuses when listing fails" 1 "refusing to create" env FAKE_RUNPOD_MODE=list-fail "$CLI" create --image image --gpu gpu --country US
+run_case "old runpodctl refuses default create" 1 "needs runpodctl >= 3.1.1" env FAKE_RUNPOD_VERSION=2.1.9 "$CLI" create --image example/image:latest --gpu gpu
 run_case "ambiguous SSH data refuses tunnel" 1 "could not resolve pod host/port" env FAKE_RUNPOD_MODE=ambiguous-ssh "$CLI" tunnel unknown
 
 idem_key="same-key"
 run_case "first idempotent create" 0 "created pod pod-new" "$CLI" create --image example/image:latest --gpu gpu --idempotency-key "$idem_key"
 run_case "duplicate idempotency key replays" 0 "idempotent replay" "$CLI" create --image example/image:latest --gpu gpu --idempotency-key "$idem_key"
 run_case "failed teardown verification is not success" 1 "could not verify" run_with_input_mode y list-fail "$CLI" teardown pod-1
+
+# idempotency ledger replay must fail closed too
+run_case "ledger replay refuses when listing fails" 1 "refusing to create" env FAKE_RUNPOD_MODE=list-fail "$CLI" create --image example/image:latest --gpu gpu --idempotency-key "$idem_key"
+
+# teardown must really send podTerminate, and the REST CLI must not be used
+CURL_LOG="$TEST_TMP/curl.log"; : > "$CURL_LOG"
+run_case "teardown terminates via GraphQL then verifies" 0 "confirmed gone" run_with_input_mode y empty-list env FAKE_CURL_LOG="$CURL_LOG" "$CLI" teardown pod-1
+if grep -q 'podTerminate' "$CURL_LOG" && grep -q 'podId: "pod-1"' "$CURL_LOG" && [ "$(grep -c myself "$CURL_LOG")" -ge 1 ]; then pass "teardown issued podTerminate + a fresh listing"; else fail "teardown issued podTerminate + a fresh listing" "$(cat "$CURL_LOG")"; fi
+# API key must not appear on curl's argv; the fake exits 99 if it does, so the
+# GraphQL cases above (list/create) passing proves it. Check the guard itself works:
+run_case "fake curl rejects Bearer on argv (guard self-test)" 99 "Bearer token found on argv" curl -H "Authorization: Bearer x" https://example.invalid
+run_case "GraphQL create passes key via stdin, not argv" 0 "created pod pod-new" "$CLI" create --image image --gpu gpu --country US
+run_case "invalid pod id rejected" 1 "invalid pod id" "$CLI" get 'x"y'
 
 printf '\n%d passed; %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

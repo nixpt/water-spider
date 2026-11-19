@@ -3,6 +3,15 @@ set -euo pipefail
 
 payload=""
 args="$*"
+# The API key must never be on argv (visible in ps): reject any Bearer in argv.
+for a in "$@"; do
+  case "$a" in *Bearer*) echo "fake curl: Bearer token found on argv" >&2; exit 99 ;; esac
+done
+# Auth must arrive as a curl config on stdin (-K -).
+if [[ " $* " == *" -K - "* ]]; then
+  stdin_cfg="$(cat)"
+  [[ "$stdin_cfg" == *"Authorization: Bearer "* ]] || { echo "fake curl: no auth header on stdin" >&2; exit 98; }
+fi
 while [ $# -gt 0 ]; do
   if [ "$1" = "-d" ]; then
     payload="$2"
@@ -13,18 +22,50 @@ while [ $# -gt 0 ]; do
   fi
 done
 
-if [ "${FAKE_CURL_VALIDATE:-0}" = "1" ]; then
+if [ "${FAKE_CURL_VALIDATE:-0}" = "1" ] && [[ "$payload" == *podFindAndDeployOnDemand* ]]; then
   printf '%s' "$payload" | jq -e '.query | contains("quoted\\\"name") and contains("quoted\\\"image")' >/dev/null
 fi
 
-case "${FAKE_CURL_MODE:-ok}" in
-  transport-fail) exit 7 ;;
-  graphql-error) printf '{"errors":[{"message":"no capacity"}]}\n' ;;
+query="$(printf '%s' "$payload" | jq -r '.query // empty' 2>/dev/null || true)"
+rmode="${FAKE_RUNPOD_MODE:-ok}"
+# Every GraphQL call is logged so tests can assert which mutations ran.
+[ -n "${FAKE_CURL_LOG:-}" ] && printf '%s\n' "$query" >> "$FAKE_CURL_LOG"
+
+pods_default='[{"id":"pod-1","name":"test-pod","desiredStatus":"RUNNING","costPerHr":0.2,"gpuCount":1,"machine":{"gpuDisplayName":"NVIDIA RTX 4090","podHostId":"h1"}},{"id":"pod-new","name":"new-pod","desiredStatus":"RUNNING","costPerHr":0.3,"machine":{"gpuDisplayName":"NVIDIA RTX 4090"}}]'
+
+case "$query" in
+  *podTerminate*)
+    [ "$rmode" = "terminate-fail" ] && { printf '{"errors":[{"message":"terminate refused"}]}\n'; exit 0; }
+    printf '{"data":{"podTerminate":null}}\n'
+    ;;
+  *myself*)
+    case "$rmode" in
+      list-fail|api-fail) exit 7 ;;
+      list-graphql-error) printf '{"errors":[{"message":"not authorized"}]}\n' ;;
+      list-garbage) printf '<html>502</html>\n' ;;
+      empty-list) printf '{"data":{"myself":{"pods":[]}}}\n' ;;
+      *) jq -n --argjson p "$pods_default" '{data:{myself:{pods:$p}}}' ;;
+    esac
+    ;;
+  *"pod(input"*)
+    case "$rmode" in
+      api-fail) exit 7 ;;
+      get-missing) printf '{"data":{"pod":null}}\n' ;;
+      *) printf '{"data":{"pod":{"id":"pod-1","name":"test-pod","desiredStatus":"RUNNING","costPerHr":0.2}}}\n' ;;
+    esac
+    ;;
+  *podFindAndDeployOnDemand*)
+    case "${FAKE_CURL_MODE:-ok}" in
+      transport-fail) exit 7 ;;
+      graphql-error) printf '{"errors":[{"message":"no capacity"}]}\n' ;;
+      *) printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n' ;;
+    esac
+    ;;
   *)
     if [[ "$args" == *"/v1/models"* ]]; then
       printf '{"data":[{"id":"speedy","object":"model"}]}\n'
     else
-      printf '{"data":{"podFindAndDeployOnDemand":{"id":"pod-new"}}}\n'
+      printf '{"data":{}}\n'
     fi
     ;;
 esac

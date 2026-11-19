@@ -13,6 +13,10 @@ full details on each `WATERS-N` ID.
 - [ ] [WATERS-003](tickets/WATERS-003-live-runpod-validation.md) — Validate unproven workflows against one controlled live pod
 - [x] [WATERS-004](tickets/WATERS-004-graphql-path-hardening.md) — Harden GraphQL dependencies and input construction
 
+## P0 — Live breakage
+
+- [ ] [WATERS-024](tickets/WATERS-024-runpod-rest-host-gone.md) — rest.runpod.io is gone: move pod reads and terminate to GraphQL
+
 ## P1 — Release Readiness
 
 - [ ] [WATERS-022](tickets/WATERS-022-wsforge-pod-confinement.md) — Bake wsforge-style agent confinement into the pod images

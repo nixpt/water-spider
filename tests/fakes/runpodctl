@@ -9,20 +9,15 @@ if [ "$mode" = "api-fail" ]; then
   exit 1
 fi
 
+# rest.runpod.io is gone: pod list/get/delete must never be reached any more.
+rest_dead() { printf '{"error":"request failed: lookup rest.runpod.io: no such host"}\n' >&2; exit 1; }
+
 case "$args" in
+  *" version "*) printf 'runpodctl %s-fake\n' "${FAKE_RUNPOD_VERSION:-3.1.1}" ;;
+  *" pod list "*|*" pod get "*|*" pod delete "*) rest_dead ;;
   *" pod create "*)
     if [ "$mode" = "malformed" ]; then printf 'not-json\n'; else printf '{"id":"pod-new"}\n'; fi
     ;;
-  *" pod list "*)
-    [ "$mode" = "list-fail" ] && exit 1
-    if [ "$mode" = "empty-list" ]; then
-      printf '[]\n'
-    else
-      printf '[{"id":"pod-1","name":"test-pod","desiredStatus":"RUNNING","costPerHr":0.2,"gpuTypeId":"NVIDIA RTX 4090","machine":{"gpuDisplayName":"NVIDIA RTX 4090"}},{"id":"pod-new","name":"new-pod","desiredStatus":"RUNNING"}]\n'
-    fi
-    ;;
-  *" pod get "*) printf '{"id":"pod-1","desiredStatus":"RUNNING"}\n' ;;
-  *" pod delete "*) printf '{"id":"pod-1","deleted":true}\n' ;;
   *" ssh info "*)
     if [ "$mode" = "ambiguous-ssh" ]; then printf '{"unexpected":true}\n'; else printf '{"host":"127.0.0.1","port":22022}\n'; fi
     ;;
