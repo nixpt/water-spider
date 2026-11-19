@@ -1,6 +1,7 @@
 # Recipe: RTX A6000 (48 GB) llama.cpp pod for agent data collection
 
-Status: DRAFT, filled in as the 2026-11-19 pod session (WATERS-025) progresses.
+Status: results from the 2026-11-19 pod session (WATERS-025), pod torn down.
+Raw rows: `docs/recipes/a6000-data/q38-gapA.jsonl`.
 Pod: `bro-a6000-20261119-ann-r3` (RunPod SECURE cloud, 1x RTX A6000 49140 MiB,
 driver 595.112.07, CUDA 12.4 image, ~$0.704/hr all-in with 100 GB container disk).
 
@@ -70,7 +71,20 @@ smoke decode 170.7 tok/s with 77% MTP acceptance (178/230, code prompt).
 
 ### gemma4-31b (gemma-4-31B-it Q6_K, 25 GB)
 
-No `nextn`/MTP tensors in the GGUF header, so mtp=off. See the table rows below if measured.
+No `nextn`/MTP tensors in the GGUF header, so mtp=off. Served with the same flags minus MTP: `-c 262144 -np 2 -ctk q8_0 -ctv q8_0 -b 4096 -ub 1024`,
+VRAM 39.5 GB. Smoke: decode 24.2 tok/s (code prompt); a 62,297-token prompt prefilled at only 215 tok/s (decode 14.8 tok/s).
+Long-context prefill on gemma is ~5x slower than on Qwen3.8 (SWA/global attention at 31B dense), so budget slow first turns.
+
+### Live agent traffic (tenzo's pilot, 2 slots busy, medians over the full server logs)
+
+| model | generations | prefill, prompts >= 2k tok | decode median / p10 | MTP acceptance |
+|---|---|---|---|---|
+| qwen38-27b-q8 (mtp off) | 242 | 1326 tok/s | 19.3 / 17.3 | n/a |
+| qwen36-35b-a3b (mtp on) | 482 | 3797 tok/s | 106.5 / 81.2 | 0.70 |
+| gemma4-31b (mtp off) | 132 | 464 tok/s | 17.5 / 11.3 | n/a |
+
+Rule of thumb from this card: the MoE with MTP is ~5x the decode of either dense model and ~3x the prefill; if throughput
+matters more than the specific model, run `qwen36-35b-a3b` with MTP.
 
 ## Gotchas hit on this pod
 
