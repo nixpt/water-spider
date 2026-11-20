@@ -964,12 +964,15 @@ cmd_scaffold() {
 # Redaction program (sed -E, GNU): applied remotely AND locally; idempotent.
 ws_redact_prog() {
   cat <<'RED'
-s|(://[^/:@[:space:]]+):[^/@[:space:]]+@|\1:<redacted>@|g
-s/([A-Za-z0-9_.-]*(token|key|secret|passw(or)?d|credential|auth)[A-Za-z0-9_.-]*)=[^[:space:]]+/\1=<redacted>/Ig
-s/(^|[[:space:]])(--?[A-Za-z0-9_-]*(token|key|secret|passw(or)?d|auth)[A-Za-z0-9_-]*)[[:space:]]+[^-[:space:]][^[:space:]]*/\1\2 <redacted>/Ig
-s#(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+/=-]+#\1 <redacted>#Ig
-s/(authorization[:=]?[[:space:]]*)[^[:space:]<]+/\1<redacted>/Ig
+s|(://)[^/[:space:]]*@|\1<redacted>@|g
+s/([A-Za-z0-9_.-]*(token|key|secret|pass|credential|auth|cookie|jwt|pwd)[A-Za-z0-9_.-]*)=("[^"]*"|'[^']*'|[^[:space:]]+)/\1=<redacted>/Ig
+s/(^|[[:space:]])(--?[A-Za-z0-9_-]*(token|key|secret|pass|pwd|cookie|jwt|session-id|auth|user)[A-Za-z0-9_-]*)[[:space:]]+("[^"]*"|'[^']*'|[^-[:space:]][^[:space:]]*|-[^-[:space:]][^[:space:]]*)/\1\2 <redacted>/Ig
+s/(^|[[:space:]])(-u)[[:space:]]+[^[:space:]<][^[:space:]]*/\1\2 <redacted>/g
+s/(^|[[:space:]])(-p)[[:space:]]+[^0-9[:space:]<][^[:space:]]*/\1\2 <redacted>/g
+s#(Bearer|Basic|Token)[[:space:]]+[^[:space:]<]+#\1 <redacted>#Ig
+s/([A-Za-z0-9_-]*(token|key|secret|pass|auth)[A-Za-z0-9_-]*:[[:space:]]*)[^[:space:]<:][^[:space:]]*/\1<redacted>/Ig
 s/(^|[^A-Za-z0-9])(hf_|sk-|rp_|ghp_|gho_|github_pat_|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}/\1<redacted>/g
+s/(^|[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\2/g
 RED
 }
 ws_redact() { sed -E -e "$(ws_redact_prog)"; }
@@ -982,6 +985,7 @@ ws_probe_script() {
 main() {
   sec() { printf '@@WS:%s@@\n' "$1"; }
   have() { command -v "$1" >/dev/null 2>&1; }
+  to() { if have timeout; then timeout 10 "$@"; else "$@"; fi; }
   rd() { local v=""; [ -r "$1" ] && read -r v <"$1"; printf '%s' "$v"; }
   sec meta
   printf 'ts=%s\nhost=%s\nuser=%s\nself=%s\n' "$(date +%s 2>/dev/null)" "$(hostname 2>/dev/null)" "$(id -un 2>/dev/null)" "$$"
@@ -995,28 +999,28 @@ main() {
   fi
   sec gpu
   if have nvidia-smi; then
-    o="$(nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,power.limit,clocks.sm,clocks.mem --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
+    o="$(to nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,power.limit,clocks.sm,clocks.mem --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
   else
     echo ABSENT
   fi
   sec gpuproc
   if have nvidia-smi; then
-    o="$(nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
+    o="$(to nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
   else
     echo ABSENT
   fi
   sec ps
   if have ps; then
-    o="$(ps -eo user:24=,pid=,ppid=,etimes=,pcpu=,rss=,args= 2>/dev/null)" || o=""
+    o="$(to ps -eo user:24=,pid=,ppid=,etimes=,pcpu=,rss=,args= 2>/dev/null)" || o=""
     printf '%s\n' "$o" | red | awk -v s="$$" '$2 != s && $3 != s && $0 !~ /ps -eo user:24=/'
   else
     echo ABSENT
   fi
   sec listen
   l=""
-  if have ss && l="$(ss -ltnp 2>/dev/null)"; then
+  if have ss && l="$(to ss -ltnp 2>/dev/null)"; then
     echo mode=ss; printf '%s\n' "$l" | red
-  elif have netstat && l="$(netstat -ltnp 2>/dev/null)"; then
+  elif have netstat && l="$(to netstat -ltnp 2>/dev/null)"; then
     echo mode=netstat; printf '%s\n' "$l" | red
   else
     echo mode=proc
@@ -1036,7 +1040,7 @@ main() {
     done
   fi
   sec disk
-  df -P -k / /workspace 2>/dev/null || true
+  to df -P -k / /workspace 2>/dev/null || true
   sec end
 }
 main </dev/null; exit
@@ -1071,13 +1075,14 @@ ws_vis_resolve() {
   [ -n "$V_PROBE" ] && return 0
   if [ -z "$V_HOST" ] || [ -z "$V_PORT" ]; then
     [ -n "$V_ID" ] || die "need a <pod-id>, or both --host and --pod-port"
+    [[ "$V_ID" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid pod id: $V_ID"
     local info hp
     info="$(rp_json ssh info "$V_ID")"
     hp="$(ws_resolve_host_port "$info")"; V_HOST="${V_HOST:-${hp%%:*}}"; V_PORT="${V_PORT:-${hp##*:}}"
   fi
   [ -n "$V_HOST" ] && [ -n "$V_PORT" ] || die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"
   [[ "$V_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --host: $V_HOST"
-  [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] || die "invalid --pod-port: $V_PORT"
+  [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ] || die "invalid --pod-port: $V_PORT"
 }
 
 # One ssh round trip -> $1 (a local file). Never leaves a pipe for the
@@ -1087,7 +1092,7 @@ ws_vis_fetch() {
   if [ -n "$V_PROBE" ]; then
     ws_redact <"$V_PROBE" >"$out"; return 0
   fi
-  cm="$(ws_cm_dir)"
+  cm="$(ws_cm_dir)" || return 1
   ws_probe_script | ssh -T -p "$V_PORT" -i "$SSH_KEY" -o IdentitiesOnly=yes \
     -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
     -o StrictHostKeyChecking=accept-new \
@@ -1165,7 +1170,7 @@ ws_vis_render() {
         echo "GPU process pid $pid (${pname:-?}, ${used} MiB) is not visible in this container's process table: owner/parent unidentifiable (pid namespace?), SIGKILL-prone" >>"$flags"
       else
         local ppid; ppid="$(awk '{print $3}' <<<"$row")"
-        [ "$ppid" = 1 ] || [ "$ppid" = 0 ] && echo "GPU process pid $pid (${pname:-?}) is orphaned (parent pid $ppid, no shell/supervisor holds it): SIGKILL-prone" >>"$flags"
+        [ "$ppid" = 1 ] || [ "$ppid" = 0 ] && echo "GPU process pid $pid (${pname:-?}) is reparented to pid $ppid (no shell/supervisor parent holds it; normal for nohup under a container entrypoint): SIGKILL-prone" >>"$flags"
       fi
     done <"$t/gp"
   fi
@@ -1219,7 +1224,8 @@ ws_vis_render() {
       [[ "$pr" =~ ^[0-9]+/(.+)$ ]] && pname="${BASH_REMATCH[1]}"
       [ "$mode" != ps ] || printf '   %-9s %-28s %-8s %s\n' "$exp" "${addr:-*}" "$port" "$pr"
       if [ "$exp" = PUBLIC ] && [ "${pname#sshd}" = "$pname" ]; then
-        if [ "$pname" = "-" ]; then echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") (owner unknown: ${mode_} gave no process info), not shown to be sshd" >>"$flags"
+        if [ "$pname" = "-" ] && [ "$mode_" = proc ] && [ "$port" = 22 ]; then :
+        elif [ "$pname" = "-" ]; then echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") (owner unknown: ${mode_} gave no process info), not shown to be sshd" >>"$flags"
         else echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") owned by $pname (not sshd)" >>"$flags"; fi
       fi
   done < <(grep -v '^mode=' "$t/ls")
@@ -1294,7 +1300,8 @@ case "$sub" in
   scaffold)  cmd_scaffold "$@" ;;
   ps)        cmd_ps "$@" ;;
   gpu)       cmd_gpu "$@" ;;
-  _probe-script) ws_probe_script ;;   # internal: the read-only remote script (tests)
+  _probe-script) ws_probe_script ;;
+  _redact-prog)  ws_redact_prog ;;   # internal: the read-only remote script (tests)
   -h|--help|help) usage ;;
   *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac

@@ -121,7 +121,7 @@ run_case "ps flags ipv6 public listener" 0 "PUBLIC listener [::]:9999" printf '%
 if printf '%s' "$PSOUT" | grep -q 'PUBLIC listener 0.0.0.0:22 '; then fail "ps does not flag sshd" "$PSOUT"; else pass "ps does not flag sshd"; fi
 run_case "ps shows loopback listener" 0 "LOOPBACK  127.0.0.1" printf '%s' "$PSOUT"
 run_case "ps flags unidentifiable GPU process" 0 "pid 777 (ghost" printf '%s' "$PSOUT"
-run_case "ps flags orphaned GPU process" 0 "pid 4242 (python3) is orphaned" printf '%s' "$PSOUT"
+run_case "ps flags orphaned GPU process" 0 "pid 4242 (python3) is reparented to pid" printf '%s' "$PSOUT"
 run_case "ps flags disk > 90%" 0 "disk / is 95% full" printf '%s' "$PSOUT"
 run_case "ps flags VRAM > 95%" 0 "VRAM on GPU0 is 23900/24564 MiB" printf '%s' "$PSOUT"
 run_case "ps shows cgroup mem and cpu, not host" 0 "mem 20.0 GiB / 64.0 GiB (31%)   cpu limit 16.0 vCPU" printf '%s' "$PSOUT"
@@ -134,6 +134,30 @@ run_case "gpu --watch runs bounded ticks" 0 "refresh every 5s" env WATER_SPIDER_
 run_case "ps resolves a bare pod id like connect" 0 "pod pod-1" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps pod-1
 run_case "ps rejects option-injection host" 1 "invalid --host" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host -oProxyCommand=x --pod-port 22
 run_case "ps ssh failure is an error with redacted stderr" 1 "token=<redacted>" env FAKE_SSH_PROBE_FAIL=1 FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+
+# redaction fuzz: every secret must vanish, and a second pass must change nothing
+RED_PROG="$("$CLI" _redact-prog)"
+RED_CASES=(
+  'run --token abc123XYZ end' 'run --token -x1secretval end' 'a --token "multi word secret" b' "PGPASSWORD='a b secret' psql"
+  'curl -H X-Api-Key: s3cr3tvalue1 x' 'curl -H Authorization: Token tok3nvalue99 x' 'curl -u admin:s3cr3tpass x' 'tool --user bob:s3cr3tpass x'
+  'git clone https://ghtoken1234@github.com/x' 'git clone https://u:p@ss@github.com/x' 'x --password s3cr3tpw' 'x --pass s3cr3tpw' 'x --passphrase s3cr3tpw'
+  'x --cookie s3cr3tcookie' 'x --jwt s3cr3tjwt' 'x --session-id s3cr3tsid' 'x -p s3cr3tpw' 'x HF_TOKEN=hf_AbCdEf0123456789'
+  'x Authorization: Bearer abcdefghijklmnop' 'x 0123456789abcdef0123456789abcdef01234567 y' 'x sk-live1234567890abcd' 'x rp_ABCDEFGH1234'
+)
+RED_SECRETS=(abc123XYZ x1secretval "multi word" "a b secret" s3cr3tvalue1 tok3nvalue99 s3cr3tpass ghtoken1234 "p@ss" s3cr3tpw s3cr3tcookie s3cr3tjwt s3cr3tsid hf_AbCdEf abcdefghijklmnop 0123456789abcdef0123456789abcdef01234567 sk-live123 rp_ABCDEFGH)
+red_leak=""; red_idem=""
+for c in "${RED_CASES[@]}"; do
+  o1="$(printf '%s\n' "$c" | sed -E -e "$RED_PROG")"; o2="$(printf '%s\n' "$o1" | sed -E -e "$RED_PROG")"
+  for sec in "${RED_SECRETS[@]}"; do case "$c" in *"$sec"*) case "$o1" in *"$sec"*) red_leak="$red_leak [$c => $o1]";; esac;; esac; done
+  [ "$o1" = "$o2" ] || red_idem="$red_idem [$o1 => $o2]"
+done
+if [ -z "$red_leak" ]; then pass "redaction fuzz: no secret survives"; else fail "redaction fuzz: no secret survives" "$red_leak"; fi
+if [ -z "$red_idem" ]; then pass "redaction is idempotent"; else fail "redaction is idempotent" "$red_idem"; fi
+export RED_PROG
+run_case "redaction keeps ordinary flags" 0 "-p 8080 --model x.gguf" bash -c "printf '%s\n' 'srv -p 8080 --model x.gguf' | sed -E -e \"\$RED_PROG\""
+run_case "broken ControlMaster dir fails closed" 1 "cannot create ControlMaster dir" env XDG_RUNTIME_DIR=/proc FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+run_case "bad pod id refused before API call" 1 "invalid pod id" "$CLI" ps 'a;b'
+run_case "bad port refused" 1 "invalid --pod-port" "$CLI" ps --host 10.0.0.1 --pod-port 70000
 # the single ssh call: stdin script, ControlMaster, BatchMode, one round trip
 nssh="$(grep -c '^ARGV:' "$SSHLOG")"
 if [ "$nssh" -eq 1 ]; then pass "ps makes exactly one ssh call"; else fail "ps makes exactly one ssh call" "got $nssh"; fi
@@ -144,7 +168,7 @@ if [ "$(stat -c %a "$XDG_RUNTIME_DIR/water-spider-cm")" = 700 ]; then pass "Cont
 # the remote script is read-only
 SCRIPT="$("$CLI" _probe-script)"
 BODY="$(printf '%s\n' "$SCRIPT" | sed '1d' | sed -E 's#2?>/dev/null##g; s#2>&1##g; s#</dev/null##g')"
-RO_RE='(^|[^A-Za-z_-])(kill|pkill|rm|mv|cp|tee|mkdir|touch|chmod|apt|apt-get|pip|curl|wget|mktemp|dd)[[:space:]]|environ|<<|>[^ ]'
+RO_RE='(^|[^A-Za-z_-])(kill|pkill|rm|mv|cp|tee|mkdir|touch|chmod|apt|apt-get|pip|curl|wget|mktemp|dd)[[:space:]]|environ|<<|>[[:space:]]*[^&[:space:]]'
 if printf '%s' "$BODY" | grep -Eq "$RO_RE"; then fail "remote script is read-only" "$(printf '%s' "$BODY" | grep -En "$RO_RE" | head)"
 else pass "remote script is read-only (no kill/write/install/environ/heredoc)"; fi
 # degrade paths: run the REAL remote script with fakes; no nvidia-smi, no ss, no netstat
