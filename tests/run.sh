@@ -240,6 +240,17 @@ run_case "logs refuses token files" 1 "refusing" "$CLI" logs --host 10.0.0.1 --p
 run_case "logs refuses traversal" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/../etc/passwd
 run_case "logs refuses odd characters" 1 "plain" "$CLI" logs --host 10.0.0.1 --pod-port 2222 '/workspace/a;b'
 run_case "logs --follow needs a path" 1 "needs a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --follow
+# WATERS-029: the local pre-check shares the pod's deny list (case-insensitive); WATERS-031: pod script executed
+for d in PASSWORD.txt .bash_history .zsh_history .python_history .lesshst .NETRC .git-credentials .npmrc .pypirc \
+         Id_Rsa x.PEM s.KEY .env .env.local My_Secret.log .ssh/config .aws/credentials .config/gcloud/a.db .huggingface/hf; do
+  run_case "logs refuses $d locally" 1 "can hold credentials" "$CLI" logs --host 10.0.0.1 --pod-port 2222 "/workspace/$d"
+done
+run_case "logs allows a public key (id_*.pub)" 0 "last line" env FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/id_rsa.pub
+run_case "logs script: fd 3 re-verified, tail reads fd 3" 0 'readlink -f -- /proc/self/fd/3' printf '%s' "$("$CLI" _logs-script /workspace/x.log 50 1)"
+run_case "pod-side logs script executed under bash (allowlist, deny list, race, no orphan tail)" 0 "0 failed" "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the allowlist check fails the suite" 1 "not ok" env LOGS_MUTATE=allowlist "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the deny list fails the suite" 1 "not ok" env LOGS_MUTATE=deny "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the fd re-check fails the suite" 1 "changed after the check" env LOGS_MUTATE=fdcheck "$ROOT/tests/logs-exec.sh" bash
 LS="$("$CLI" _logs-script /workspace/x.log 50 1)"
 # padded df (real `df -P`) must still yield / and /workspace in the JSON
 PADDED="$TEST_TMP/probe-padded.txt"
@@ -294,7 +305,11 @@ RED_PASS2="$(red_line "zorro=$SHA API_KEY=$SHA" | sed -E -e "$RP1")"
 if [ "$RED_PASS2" = "zorro=$SHA API_KEY=<redacted>" ]; then pass "redaction is idempotent across the remote and local passes"; else fail "redaction is idempotent" "$RED_PASS2"; fi
 
 # opt-in: real remote script inside a locked-down local container
-if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"; fi
+if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then
+  run_case "docker: pod-side logs script executed (real roots, cap-drop ALL, no network, read-only)" 0 "0 failed" "$ROOT/tests/logs-exec.sh" docker
+  run_case "docker mutation: dropping the allowlist check fails" 1 "not ok" env LOGS_MUTATE=allowlist "$ROOT/tests/logs-exec.sh" docker
+  run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"
+fi
 
 printf '\n%d passed; %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

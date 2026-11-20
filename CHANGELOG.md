@@ -7,6 +7,13 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-20
+
+- Merge pull request #16 from nixpt/agent/ann/WATERS-031-029-030-logs-hardening
+- WATERS-029/030/031: logs hardening (deny list, fd-checked read, executed allowlist tests)
+
+
+
 ## [0.8.0] - 2026-11-20
 
 - Merge pull request #14 from nixpt/agent/ann/WATERS-028-pod-top-logs-watch

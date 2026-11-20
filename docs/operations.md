@@ -63,8 +63,18 @@ water-spider watch POD-ID --json [--interval N] [--out FILE]          # one JSON
 
 `top` adds container CPU use (cgroup usage delta), net rx/tx (non-loopback) and, when the
 RunPod API answers, spend since T0 (the first balance seen, or `--t0-balance`); it is omitted
-otherwise. `logs` refuses paths that can hold credentials (`.ssh`, `/proc`, `*.pem`, `.env`, ...)
-and requires a plain absolute path. `watch` requires `--json` (no text mode yet; without it the command errors). `watch --json` emits ps + gpu + mem + disk + net + listeners
+otherwise. `logs` requires a plain absolute path under `/workspace`, `/var/log` or `/tmp`
+and refuses paths that can hold credentials. The deny list is case-insensitive and layered on
+the allowlist (it never widens it): shell and REPL history (`*_history`, `.lesshst`, `.viminfo`),
+`.netrc`, `.git-credentials`, `.npmrc`, `.pypirc`, `.pgpass`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.jks`,
+non-`.pub` `id_*`, `.env*`, anything under `.ssh/`, `.aws/`, `.config/`, `.huggingface/`, `.git/`,
+and any name containing `passw`, `secret`, `token` or `credential`. It runs locally on the literal
+path and again on the pod on the `readlink -f` resolved path, from one shared text
+(`ws_logs_guard_src`), so a symlink into a denied file is refused. On the pod the script opens the
+file once (fd 3), re-checks that `/proc/self/fd/3` still resolves inside the allowlist and passes the
+deny list, and then `tail` reads fd 3 only (no re-open of the path, so a symlink swapped in after the
+check cannot redirect the read). `--follow` uses `tail -f --pid` on that fd: it follows the opened
+inode, so after a log rotation re-run `logs`; the tail exits with the ssh session. `watch` requires `--json` (no text mode yet; without it the command errors). `watch --json` emits ps + gpu + mem + disk + net + listeners
 + spend + flags per tick (stdout, and appended to `--out`, mode 0600) for guards and a future
 command-center panel. Redaction is best effort: attached short options (`-pSECRET`) and
 unquoted spaced values can leak, and hex runs are handled by length (WATERS-033): a run of exactly 40 (git commit) or 64 (SHA-256 digest)
@@ -75,7 +85,11 @@ bare 40/64-hex secret on a line with no secret-like word is no longer masked. Wh
 The remote and local passes use the one `ws_redact_prog`.
 
 Tests: `tests/run.sh` (fakes) and `WS_TEST_DOCKER=1 tests/run.sh` (real remote
-script in a locked-down container).
+script in a locked-down container). `tests/logs-exec.sh bash|docker` EXECUTES the pod-side `logs`
+script: each allowed root, `/etc/shadow`, `..`, `//`, `/./`, symlinks out of `/workspace`, denied
+names (mixed case), a symlink swapped between the check and the open, and no orphan `tail`. The
+docker mode uses `--cap-drop ALL --network none --read-only` (tmpfs only for `/workspace` and `/tmp`).
+`LOGS_MUTATE=allowlist|deny|fdcheck` sabotages the script; `run.sh` asserts the suite then fails.
 
 ## Private images
 
