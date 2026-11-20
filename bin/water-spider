@@ -1078,7 +1078,7 @@ ws_cm_dir() {
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then d="$XDG_RUNTIME_DIR/water-spider-cm"
   else d="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/cm"; fi
   { mkdir -p "$d" && chmod 700 "$d"; } || die "cannot create ControlMaster dir $d"
-  [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ] || die "ControlMaster dir $d must be mode 0700 and owned by you"
+  if ! { [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ]; }; then die "ControlMaster dir $d must be mode 0700 and owned by you"; fi
   printf '%s' "$d"
 }
 
@@ -1106,9 +1106,9 @@ ws_vis_resolve() {
     info="$(rp_json ssh info "$V_ID")"
     hp="$(ws_resolve_host_port "$info")"; V_HOST="${V_HOST:-${hp%%:*}}"; V_PORT="${V_PORT:-${hp##*:}}"
   fi
-  [ -n "$V_HOST" ] && [ -n "$V_PORT" ] || die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"
+  if ! { [ -n "$V_HOST" ] && [ -n "$V_PORT" ]; }; then die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"; fi
   [[ "$V_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --host: $V_HOST"
-  [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ] || die "invalid --pod-port: $V_PORT"
+  if ! { [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ]; }; then die "invalid --pod-port: $V_PORT"; fi
 }
 
 # ssh argv shared by every visibility command ($1 = ControlMaster mode).
@@ -1363,13 +1363,13 @@ cmd_pod_view() {
       *) die "$mode: unknown option '${V_REST[$i]}'" ;;
     esac
   done
-  [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ] || die "--limit must be a positive integer"
+  if ! { [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ]; }; then die "--limit must be a positive integer"; fi
   case "$mode" in
     top)   [ "$once" = 1 ] || watch="${interval:-10}" ;;
     watch) [ "$json" = 1 ] || die "watch: only --json output is implemented (pass --json)"; watch="${interval:-10}" ;;
   esac
   if [ -n "$watch" ]; then
-    [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] || die "refresh interval needs an integer N >= 5 (seconds)"
+    if ! { [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ]; }; then die "refresh interval needs an integer N >= 5 (seconds)"; fi
   fi
   [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]"
   ws_vis_resolve
@@ -1498,7 +1498,7 @@ cmd_logs() {
       *) die "logs: unknown option '${V_REST[$i]}'" ;;
     esac
   done
-  [[ "$lines" =~ ^[0-9]+$ ]] && [ "$lines" -ge 1 ] && [ "$lines" -le 5000 ] || die "--lines must be 1..5000"
+  if ! { [[ "$lines" =~ ^[0-9]+$ ]] && [ "$lines" -ge 1 ] && [ "$lines" -le 5000 ]; }; then die "--lines must be 1..5000"; fi
   [ "$sync" = 0 ] || { [ -z "$path" ] || die "logs: --sync and a path are exclusive"; path=/workspace/sync.txt; }
   [ -n "$V_ID$V_HOST" ] || die "usage: water-spider logs <pod-id> [<path>|--sync] [--follow] [--lines N] [--host H --pod-port P]"
   ws_vis_resolve
