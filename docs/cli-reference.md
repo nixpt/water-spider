@@ -75,7 +75,9 @@ water-spider logs POD-ID [PATH|--sync] [--follow] [--lines N] [--host H --pod-po
 water-spider watch POD-ID --json [--interval N] [--out FILE] [--host H --pod-port P]
 ```
 
-Read-only; see [operations](operations.md#pod-visibility). Intervals need N >= 5.
+Read-only; see [operations](operations.md#pod-visibility). Intervals need N >= 5. `logs` is limited to
+`/workspace`, `/var/log` and `/tmp`, refuses credential-looking paths (case-insensitive deny list, checked locally and
+on the pod against the resolved path, then re-checked on the opened file), and reads through one file descriptor.
 
 ### `tunnel`
 
