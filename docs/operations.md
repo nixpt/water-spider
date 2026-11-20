@@ -28,6 +28,33 @@ returns an ambiguous error, inspect `water-spider list` before retrying.
 Teardown is intentionally interactive. Pull results first, confirm the prompt,
 and retain the final independent absence check in operational logs.
 
+## Pod visibility
+
+Read-only views of what runs inside a pod, with no hand-ssh:
+
+```sh
+water-spider ps  POD-ID [--limit N]
+water-spider gpu POD-ID [--watch 5]
+# no RunPod API needed with an explicit endpoint, like `tunnel`:
+water-spider ps --host 217.138.104.26 --pod-port 10258
+```
+
+Each refresh is ONE ssh round trip: a single read-only script sent on stdin
+(`ssh ... 'bash -s'`) with ControlMaster reuse (private 0700 socket dir,
+ControlPersist 60 s), so `--watch` (N >= 5) never opens a connection storm.
+The script writes nothing on the pod (not even /tmp), installs nothing and
+never reads `/proc/*/environ`; a missing tool degrades (`nvidia-smi absent`,
+`ss` -> `netstat` -> `/proc/net/tcp`). Token-like values (`*_TOKEN=`, `*_KEY=`,
+`--token X`, `Bearer`, `hf_`, `sk-`, `rp_`) are redacted on the pod and again
+locally. CPU/RAM come from the container cgroup, not host `/proc/meminfo`.
+
+Flags (a warning line at the end): public listener other than sshd, GPU process
+with no identifiable/live parent (also shown when the container cannot see
+host-pid compute apps), `/` or `/workspace` over 90%, VRAM over 95%. The GPU
+query fields start with the MCP `gpu_status` set so both surfaces agree.
+Tests: `tests/run.sh` (fakes) and `WS_TEST_DOCKER=1 tests/run.sh` (real remote
+script in a locked-down container).
+
 ## Private images
 
 `--registry-auth-id` is a GraphQL-only field and defaults from

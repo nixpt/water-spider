@@ -57,6 +57,16 @@ water-spider connect POD-ID
 Resolves SSH data and prints a direct command, with a proxy fallback when
 needed. Ambiguous SSH records fail instead of choosing an arbitrary endpoint.
 
+### `ps` / `gpu`
+
+```sh
+water-spider ps  POD-ID [--host H --pod-port P] [--limit N]
+water-spider gpu POD-ID [--host H --pod-port P] [--watch N]
+```
+
+Read-only pod visibility over one ssh round trip; see
+[operations](operations.md#pod-visibility). `--watch` needs N >= 5.
+
 ### `tunnel`
 
 ```sh

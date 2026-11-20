@@ -39,6 +39,8 @@ water-spider create \
 water-spider list
 water-spider connect POD-ID
 water-spider tunnel POD-ID --port 8080:8080
+water-spider ps POD-ID        # read-only: processes, VRAM, listeners, risk flags
+water-spider gpu POD-ID --watch 5
 
 # Pull anything worth keeping, then remove the billable resource.
 water-spider teardown POD-ID
