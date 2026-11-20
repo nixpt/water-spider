@@ -976,6 +976,7 @@ s/(^|[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\2/g
 RED
 }
 ws_redact() { sed -E -e "$(ws_redact_prog)"; }
+ws_redact_stream() { sed -u -E -e "$(ws_redact_prog)"; }
 
 # The remote script. Emitted by `water-spider _probe-script` too (the docker
 # rehearsal pipes it into a container).
@@ -1062,7 +1063,7 @@ ws_cm_dir() {
 
 # Common option parsing for ps/gpu. Sets V_ID V_HOST V_PORT V_PROBE and V_REST.
 ws_vis_parse() {
-  V_ID=""; V_HOST=""; V_PORT=""; V_PROBE=""; V_REST=()
+  V_ID=""; V_HOST=""; V_PORT=""; V_PROBE=""; V_PATH=""; V_REST=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --host) V_HOST="${2:?--host needs a value}"; shift 2 ;;
@@ -1070,7 +1071,7 @@ ws_vis_parse() {
       --probe-file) V_PROBE="${2:?--probe-file needs a value}"; shift 2 ;;   # offline: render a captured probe
       --json|--once|--follow|--sync) V_REST+=("$1"); shift ;;
       --*) V_REST+=("$1"); [ $# -ge 2 ] && [[ "$2" != --* ]] && { V_REST+=("$2"); shift; }; shift ;;
-      *) if [ -z "$V_ID" ]; then V_ID="$1"; shift; else die "unexpected arg '$1'"; fi ;;
+      *) if [ -z "$V_ID" ]; then V_ID="$1"; shift; elif [ -z "$V_PATH" ]; then V_PATH="$1"; shift; else die "unexpected arg '$1'"; fi ;;
     esac
   done
 }
@@ -1089,19 +1090,24 @@ ws_vis_resolve() {
   [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ] || die "invalid --pod-port: $V_PORT"
 }
 
+# ssh argv shared by every visibility command ($1 = ControlMaster mode).
+ws_ssh_args() {
+  local cm; cm="$(ws_cm_dir)" || return 1
+  WS_SSH=(-T -p "$V_PORT" -i "$SSH_KEY" -o IdentitiesOnly=yes
+    -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3
+    -o StrictHostKeyChecking=accept-new
+    -o "ControlMaster=${1:-auto}" -o "ControlPath=$cm/%C" -o ControlPersist=60 "root@$V_HOST")
+}
+
 # One ssh round trip -> $1 (a local file). Never leaves a pipe for the
 # ControlPersist master to hold open.
 ws_vis_fetch() {
-  local out="$1" cm rc=0
+  local out="$1" rc=0
   if [ -n "$V_PROBE" ]; then
     ws_redact <"$V_PROBE" >"$out"; return 0
   fi
-  cm="$(ws_cm_dir)" || return 1
-  ws_probe_script | ssh -T -p "$V_PORT" -i "$SSH_KEY" -o IdentitiesOnly=yes \
-    -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
-    -o StrictHostKeyChecking=accept-new \
-    -o ControlMaster=auto -o "ControlPath=$cm/%C" -o ControlPersist=60 \
-    "root@$V_HOST" 'bash -s' >"$out.raw" 2>"$out.err" || rc=$?
+  ws_ssh_args auto || return 1
+  ws_probe_script | ssh "${WS_SSH[@]}" 'bash -s' >"$out.raw" 2>"$out.err" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "$SCRIPT_NAME: ssh to $V_HOST:$V_PORT failed (rc=$rc): $(ws_redact <"$out.err" | tail -3 | tr '\n' ' ')" >&2
     return 1
@@ -1260,7 +1266,7 @@ ws_spend_update() {
   if ! [[ "$bal" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WS_SPEND_JSON="null"; WS_SPEND_LINE=""; return 0; fi
   [ -n "$WS_T0" ] || WS_T0="$bal"
   WS_SPEND_JSON="$(jq -cn --argjson b "$bal" --argjson t "$WS_T0" '{balance_usd:$b, t0_balance_usd:$t, spent_usd:((($t-$b)*100|round)/100)}')"
-  WS_SPEND_LINE="spend: \$$(awk -v a="$WS_T0" -v b="$bal" 'BEGIN{printf "%.2f", a-b}') since T0 (balance \$$bal, T0 \$$WS_T0)"
+  WS_SPEND_LINE="$(awk -v a="$WS_T0" -v b="$bal" 'BEGIN{printf "spend: $%.2f since T0 (balance $%.2f, T0 $%.2f)", a-b, b, a}')"
 }
 
 # net rx/tx (non-lo) and cgroup cpu usage, with rates from the previous tick.
@@ -1319,6 +1325,7 @@ ws_vis_json() {
 cmd_pod_view() {
   local mode="$1"; shift
   ws_vis_parse "$@"
+  [ -z "$V_PATH" ] || die "$mode: unexpected arg '$V_PATH'"
   local watch="" limit=40 i=0 json=0 out="" interval="" once=0
   [ "$mode" != top ] || limit=8
   while [ "$i" -lt "${#V_REST[@]}" ]; do
@@ -1371,6 +1378,59 @@ cmd_pod_view() {
     sleep "$watch"
   done
 }
+
+# ---- logs (WATERS-028) -----------------------------------------------------------
+# Read-only tail of one file on the pod. The script goes over stdin like the
+# probe; output is redacted on the pod and again locally. --follow is ONE long
+# ssh (tail -F), no polling.
+ws_logs_script() {
+  local path="$1" lines="$2" follow="$3"
+  printf 'red() { sed -u -E -e %q; }\n' "$(ws_redact_prog)"
+  printf 'f=%q\n' "$path"
+  printf 'n=%s\n' "$lines"
+  if [ "$follow" = 1 ]; then printf 'fl=1\n'; else printf 'fl=0\n'; fi
+  cat <<'REMOTE'
+main() {
+  if [ ! -f "$f" ] || [ ! -r "$f" ]; then echo "water-spider: $f is not a readable regular file on the pod" >&2; return 2; fi
+  if [ "$fl" = 1 ]; then tail -n "$n" -F -- "$f" 2>&1 | red; else tail -n "$n" -- "$f" 2>&1 | red; fi
+}
+main </dev/null; exit
+REMOTE
+}
+
+cmd_logs() {
+  ws_vis_parse "$@"
+  local follow=0 sync=0 lines=100 i=0 path="$V_PATH"
+  if [ -z "$path" ] && [[ "$V_ID" == /* ]]; then path="$V_ID"; V_ID=""; fi
+  while [ "$i" -lt "${#V_REST[@]}" ]; do
+    case "${V_REST[$i]}" in
+      --follow) follow=1; i=$((i+1)) ;;
+      --sync) sync=1; i=$((i+1)) ;;
+      --lines) lines="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      *) die "logs: unknown option '${V_REST[$i]}'" ;;
+    esac
+  done
+  [[ "$lines" =~ ^[0-9]+$ ]] && [ "$lines" -ge 1 ] && [ "$lines" -le 5000 ] || die "--lines must be 1..5000"
+  [ "$sync" = 0 ] || { [ -z "$path" ] || die "logs: --sync and a path are exclusive"; path=/workspace/sync.txt; }
+  [ -n "$V_ID$V_HOST" ] || die "usage: water-spider logs <pod-id> [<path>|--sync] [--follow] [--lines N] [--host H --pod-port P]"
+  ws_vis_resolve
+  if [ -z "$path" ]; then
+    [ "$follow" = 0 ] || die "logs: --follow needs a path or --sync"
+    echo "no path given; recent log-like files under /workspace (pass one, or --sync):"
+    ws_ssh_args auto || exit 1
+    printf '%s\n' 'ls -1t /workspace/*.log /workspace/*.txt /workspace/results/*.log /workspace/logs/*.log 2>/dev/null | head -20' \
+      | ssh "${WS_SSH[@]}" 'bash -s' 2>&1 | ws_redact
+    return 0
+  fi
+  [[ "$path" =~ ^/[A-Za-z0-9._/@+-]+$ ]] || die "logs: path must be absolute and plain ([A-Za-z0-9._/@+-])"
+  case "$path" in
+    *..*|/proc/*|/sys/*|/etc/shadow*|*/.ssh/*|*/id_*|*.pem|*.key|*.env|*/.env*|*/.netrc|*/.git-credentials|*/.runpod/*|*/.config/*|*/.aws/*|*/.docker/*) die "logs: refusing a path that can hold credentials: $path" ;;
+  esac
+  if [ -n "$V_PROBE" ]; then ws_redact <"$V_PROBE"; return 0; fi   # offline: render a captured log
+  ws_ssh_args "$([ "$follow" = 1 ] && echo no || echo auto)" || exit 1
+  ws_logs_script "$path" "$lines" "$follow" | ssh "${WS_SSH[@]}" 'bash -s' 2>&1 | ws_redact_stream
+}
+
 cmd_ps()  { cmd_pod_view ps "$@"; }
 cmd_gpu() { cmd_pod_view gpu "$@"; }
 cmd_top() { cmd_pod_view top "$@"; }
@@ -1401,6 +1461,7 @@ case "$sub" in
   watch)     cmd_watch "$@" ;;
   _probe-script) ws_probe_script ;;   # internal: the read-only remote script (tests)
   _redact-prog)  ws_redact_prog ;;
+  _logs-script)  ws_logs_script "$@" ;;
   -h|--help|help) usage ;;
   *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac

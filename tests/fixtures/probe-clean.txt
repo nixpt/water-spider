@@ -8,6 +8,7 @@ v=2
 mem_current=21474836480
 mem_max=68719476736
 cpu_max=1600000 100000
+cpu_usec=5000000
 @@WS:gpu@@
 0, NVIDIA GeForce RTX 4090, GPU-aaaa, 1000, 24564, 5, 40, 80.0, 450.00, 210, 405
 @@WS:gpuproc@@
@@ -21,6 +22,11 @@ mode=ss
 State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
 LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=10,fd=3))
 LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* users:(("python3",pid=4242,fd=5))
+@@WS:net@@
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1000 10 0 0 0 0 0 0 1000 10 0 0 0 0 0 0
+  eth0: 3000000000 100 0 0 0 0 0 0 500000000 90 0 0 0 0 0 0
 @@WS:disk@@
 Filesystem 1024-blocks Used Available Capacity Mounted on
 overlay 104857600 99614720 5242880 10% /
