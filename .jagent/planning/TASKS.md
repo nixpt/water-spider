@@ -15,12 +15,14 @@ full details on each `WATERS-N` ID.
 
 ## P0 — Live breakage
 
-- [ ] [WATERS-028](tickets/WATERS-028-pod-top-logs-watch.md) — Pod visibility: top + logs + watch --json
-- [ ] [WATERS-027](tickets/WATERS-027-pod-ps-gpu.md) — Pod visibility: ps + gpu (read-only, one ssh round trip)
+- [x] [WATERS-028](tickets/WATERS-028-pod-top-logs-watch.md) — Pod visibility: top + logs + watch --json
+- [x] [WATERS-027](tickets/WATERS-027-pod-ps-gpu.md) — Pod visibility: ps + gpu (read-only, one ssh round trip)
 - [ ] [WATERS-024](tickets/WATERS-024-runpod-rest-host-gone.md) — rest.runpod.io is gone: move pod reads and terminate to GraphQL
 
 ## P1 — Release Readiness
 
+- [ ] [WATERS-031](tickets/WATERS-031-logs-allowlist-test.md) — Test the pod-side logs allowlist by executing it
+- [ ] [WATERS-029](tickets/WATERS-029-logs-deny-patterns.md) — logs: widen the credential deny patterns
 - [ ] [WATERS-022](tickets/WATERS-022-wsforge-pod-confinement.md) — Bake wsforge-style agent confinement into the pod images
 - [ ] [WATERS-021](tickets/WATERS-021-ampere-agent-validation.md) — Publish and live-validate Ampere agent inference
 - [x] [WATERS-020](tickets/WATERS-020-mayfly-opencode.md) — Connect Mayfly and OpenCode to tunneled v2 inference
@@ -34,6 +36,8 @@ full details on each `WATERS-N` ID.
 
 ## P2 — Project Metadata
 
+- [ ] [WATERS-032](tickets/WATERS-032-help-visibility-commands.md) — --help lists top, logs and watch
+- [ ] [WATERS-030](tickets/WATERS-030-logs-toctou.md) — logs: close the readlink-to-tail race
 - [x] [WATERS-019](tickets/WATERS-019-v2-operator-guide.md) — Document v2 GPU, llama.cpp, GUI, storage, and MCP use
 - [x] [WATERS-015](tickets/WATERS-015-agent-skill.md) — Add a cost-safe water-spider skill for agents
 - [x] [WATERS-014](tickets/WATERS-014-user-guides.md) — Restructure the README and add user-facing guides
