@@ -51,3 +51,16 @@ A live campaign requires:
 
 Update `STATE.md`, WATERS-003, and source caveats only for paths actually
 observed live.
+
+## ShellCheck version
+
+CI pins ShellCheck v0.10.0 (`.github/workflows/ci.yml`). Local gates must use that exact version: a newer
+ShellCheck (0.11) is silent about SC2015 (`A && B || C`) and similar findings that v0.10.0 reports, so a local
+"clean" can still turn CI red. Download the v0.10.0 release tarball and run it over every shell file the action
+scans (`scandir: '.'`), for example:
+
+```sh
+git ls-files | grep -E '\.sh$|^bin/|^tests/fakes/|\.githooks/|^integrations/' | xargs shellcheck -f gcc
+```
+
+When you change the pinned version, update this note.
