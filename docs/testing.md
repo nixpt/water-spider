@@ -60,7 +60,7 @@ ShellCheck (0.11) is silent about SC2015 (`A && B || C`) and similar findings th
 scans (`scandir: '.'`), for example:
 
 ```sh
-git ls-files | grep -E '\.sh$|^bin/|^tests/fakes/|\.githooks/|^integrations/' | xargs shellcheck -f gcc
+git ls-files | grep -E '\.sh$|^bin/|^tests/fakes/|^\.githooks/|water-spider-mayfly$' | xargs shellcheck -f gcc
 ```
 
 When you change the pinned version, update this note.
