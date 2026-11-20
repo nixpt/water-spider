@@ -15,14 +15,17 @@ full details on each `WATERS-N` ID.
 
 ## P0 — Live breakage
 
+- [x] [WATERS-034](tickets/WATERS-034-ci-shellcheck.md) — Fix CI ShellCheck: SC2015 under the pinned v0.10.0 (P1)
 - [x] [WATERS-028](tickets/WATERS-028-pod-top-logs-watch.md) — Pod visibility: top + logs + watch --json
 - [x] [WATERS-027](tickets/WATERS-027-pod-ps-gpu.md) — Pod visibility: ps + gpu (read-only, one ssh round trip)
 - [ ] [WATERS-024](tickets/WATERS-024-runpod-rest-host-gone.md) — rest.runpod.io is gone: move pod reads and terminate to GraphQL
 
 ## P1 — Release Readiness
 
-- [ ] [WATERS-031](tickets/WATERS-031-logs-allowlist-test.md) — Test the pod-side logs allowlist by executing it
-- [ ] [WATERS-029](tickets/WATERS-029-logs-deny-patterns.md) — logs: widen the credential deny patterns
+- [ ] [WATERS-035](tickets/WATERS-035-logs-deny-gaps.md) — logs: close the deny-list gaps from the #16 review (P2, ann)
+- [ ] [WATERS-036](tickets/WATERS-036-logs-fifo-open-hang.md) — logs: a FIFO swapped in after the check hangs the open (P2, ann)
+- [x] [WATERS-031](tickets/WATERS-031-logs-allowlist-test.md) — Test the pod-side logs allowlist by executing it
+- [x] [WATERS-029](tickets/WATERS-029-logs-deny-patterns.md) — logs: widen the credential deny patterns
 - [ ] [WATERS-022](tickets/WATERS-022-wsforge-pod-confinement.md) — Bake wsforge-style agent confinement into the pod images
 - [ ] [WATERS-021](tickets/WATERS-021-ampere-agent-validation.md) — Publish and live-validate Ampere agent inference
 - [x] [WATERS-020](tickets/WATERS-020-mayfly-opencode.md) — Connect Mayfly and OpenCode to tunneled v2 inference
@@ -36,9 +39,10 @@ full details on each `WATERS-N` ID.
 
 ## P2 — Project Metadata
 
-- [ ] [WATERS-032](tickets/WATERS-032-help-visibility-commands.md) — --help lists top, logs and watch
-- [ ] [WATERS-030](tickets/WATERS-030-logs-toctou.md) — logs: close the readlink-to-tail race
-- [ ] [WATERS-033](tickets/WATERS-033-redact-commit-ids.md) — redaction: stop masking git commit ids (P3)
+- [ ] [WATERS-037](tickets/WATERS-037-logs-docs-limits.md) — docs: state the logs guard's known limits (P3, ann)
+- [x] [WATERS-032](tickets/WATERS-032-help-visibility-commands.md) — --help lists top, logs and watch
+- [x] [WATERS-030](tickets/WATERS-030-logs-toctou.md) — logs: close the readlink-to-tail race
+- [x] [WATERS-033](tickets/WATERS-033-redact-commit-ids.md) — redaction: stop masking git commit ids (P3)
 - [x] [WATERS-019](tickets/WATERS-019-v2-operator-guide.md) — Document v2 GPU, llama.cpp, GUI, storage, and MCP use
 - [x] [WATERS-015](tickets/WATERS-015-agent-skill.md) — Add a cost-safe water-spider skill for agents
 - [x] [WATERS-014](tickets/WATERS-014-user-guides.md) — Restructure the README and add user-facing guides

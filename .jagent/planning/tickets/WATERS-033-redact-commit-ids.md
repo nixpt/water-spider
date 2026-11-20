@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-033 |
 | **Priority** | P3 |
-| **Status** | Open |
+| **Status** | Done (v0.8.2) |
 | **Phase** | Operations |
 | **Assignee** | ann |
 | **Dependencies** | WATERS-028 (merged, v0.8.0) |

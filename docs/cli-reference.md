@@ -75,7 +75,10 @@ water-spider logs POD-ID [PATH|--sync] [--follow] [--lines N] [--host H --pod-po
 water-spider watch POD-ID --json [--interval N] [--out FILE] [--host H --pod-port P]
 ```
 
-Read-only; see [operations](operations.md#pod-visibility). Intervals need N >= 5.
+Read-only; see [operations](operations.md#pod-visibility). Intervals need N >= 5. `watch` without `--json` is an error (no text mode yet). Output is redacted on the pod and locally; full git commit
+ids (40 hex) and SHA-256 digests (64 hex) are kept unless a secret-like word precedes them on the line. `logs` is limited to
+`/workspace`, `/var/log` and `/tmp`, refuses credential-looking paths (case-insensitive deny list, checked locally and
+on the pod against the resolved path, then re-checked on the opened file), and reads through one file descriptor.
 
 ### `tunnel`
 

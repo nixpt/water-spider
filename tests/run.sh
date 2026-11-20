@@ -142,7 +142,7 @@ RED_CASES=(
   'curl -H X-Api-Key: s3cr3tvalue1 x' 'curl -H Authorization: Token tok3nvalue99 x' 'curl -u admin:s3cr3tpass x' 'tool --user bob:s3cr3tpass x'
   'git clone https://ghtoken1234@github.com/x' 'git clone https://u:p@ss@github.com/x' 'x --password s3cr3tpw' 'x --pass s3cr3tpw' 'x --passphrase s3cr3tpw'
   'x --cookie s3cr3tcookie' 'x --jwt s3cr3tjwt' 'x --session-id s3cr3tsid' 'x -p s3cr3tpw' 'x HF_TOKEN=hf_AbCdEf0123456789'
-  'x Authorization: Bearer abcdefghijklmnop' 'x 0123456789abcdef0123456789abcdef01234567 y' 'x sk-live1234567890abcd' 'x rp_ABCDEFGH1234'
+  'x Authorization: Bearer abcdefghijklmnop' 'x the key is 0123456789abcdef0123456789abcdef01234567 y' 'x 0123456789abcdef0123456789abcdef01234567ab y' 'x sk-live1234567890abcd' 'x rp_ABCDEFGH1234'
 )
 RED_SECRETS=(abc123XYZ x1secretval "multi word" "a b secret" s3cr3tvalue1 tok3nvalue99 s3cr3tpass ghtoken1234 "p@ss" s3cr3tpw s3cr3tcookie s3cr3tjwt s3cr3tsid hf_AbCdEf abcdefghijklmnop 0123456789abcdef0123456789abcdef01234567 sk-live123 rp_ABCDEFGH)
 red_leak=""; red_idem=""
@@ -240,6 +240,17 @@ run_case "logs refuses token files" 1 "refusing" "$CLI" logs --host 10.0.0.1 --p
 run_case "logs refuses traversal" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/../etc/passwd
 run_case "logs refuses odd characters" 1 "plain" "$CLI" logs --host 10.0.0.1 --pod-port 2222 '/workspace/a;b'
 run_case "logs --follow needs a path" 1 "needs a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --follow
+# WATERS-029: the local pre-check shares the pod's deny list (case-insensitive); WATERS-031: pod script executed
+for d in PASSWORD.txt .bash_history .zsh_history .python_history .lesshst .NETRC .git-credentials .npmrc .pypirc \
+         Id_Rsa x.PEM s.KEY .env .env.local My_Secret.log .ssh/config .aws/credentials .config/gcloud/a.db .huggingface/hf; do
+  run_case "logs refuses $d locally" 1 "can hold credentials" "$CLI" logs --host 10.0.0.1 --pod-port 2222 "/workspace/$d"
+done
+run_case "logs allows a public key (id_*.pub)" 0 "last line" env FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/id_rsa.pub
+run_case "logs script: fd 3 re-verified, tail reads fd 3" 0 'readlink -f -- /proc/self/fd/3' printf '%s' "$("$CLI" _logs-script /workspace/x.log 50 1)"
+run_case "pod-side logs script executed under bash (allowlist, deny list, race, no orphan tail)" 0 "0 failed" "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the allowlist check fails the suite" 1 "not ok" env LOGS_MUTATE=allowlist "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the deny list fails the suite" 1 "not ok" env LOGS_MUTATE=deny "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the fd re-check fails the suite" 1 "changed after the check" env LOGS_MUTATE=fdcheck "$ROOT/tests/logs-exec.sh" bash
 LS="$("$CLI" _logs-script /workspace/x.log 50 1)"
 # padded df (real `df -P`) must still yield / and /workspace in the JSON
 PADDED="$TEST_TMP/probe-padded.txt"
@@ -260,8 +271,45 @@ run_case "top computes rx rate and cpu use across ticks" 0 "rx 10.00 MB/s" env W
 run_case "top cpu used across ticks" 0 "cpu used: 2.00 vCPU" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr2" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
 if printf '%s' "$LS" | grep -Eq '(^|[^A-Za-z_-])(kill|rm|mv|cp|tee|mkdir|touch|chmod|curl|wget|dd)[[:space:]]|environ|<<'; then fail "logs script is read-only" "$LS"; else pass "logs script is read-only"; fi
 
+# --- WATERS-032: --help covers every dispatched subcommand (can't drift) ---
+HELP="$("$CLI" --help 2>&1)"
+DISPATCHED="$(awk '/^case "\$sub" in/{f=1;next} f&&/^esac/{f=0} f&&/^  [a-z|-]+\)/{sub(/\).*/,""); print}' "$CLI" | tr '|' ' ')"
+missing=""
+for c in $DISPATCHED; do
+  case "$c" in help|-h|--help|ls) continue ;; esac   # aliases of list/--help
+  printf '%s' "$HELP" | grep -Eq "^  water-spider $c( |$)" || missing="$missing $c"
+done
+if [ -z "$missing" ] && [ "$(wc -w <<<"$DISPATCHED")" -ge 18 ]; then pass "--help lists every dispatched subcommand"; else fail "--help lists every dispatched subcommand" "missing:${missing:-none}; dispatched: $DISPATCHED"; fi
+run_case "--help shows top flags" 0 "top <pod-id> [--host H --pod-port P] [--interval N] [--once]" printf '%s' "$HELP"
+run_case "--help shows logs flags" 0 "logs <pod-id> [<path>|--sync] [--follow] [--lines N]" printf '%s' "$HELP"
+run_case "--help shows watch flags" 0 "watch <pod-id> --json [--interval N] [--out FILE]" printf '%s' "$HELP"
+run_case "--help says watch needs --json" 0 "without it is an error" printf '%s' "$HELP"
+
+# --- WATERS-033: commit ids survive redaction; secrets do not ---
+SHA=0123456789abcdef0123456789abcdef01234567
+DIG="${SHA}0123456789abcdef0123456789abcdef01234567"; DIG="${DIG:0:64}"
+red_line() { printf '%s\n' "$1" | sed -E -e "$("$CLI" _redact-prog)"; }
+for l in "zorro=$SHA" "commit $SHA" "commit $SHA (HEAD -> main)" "head=$SHA" "sha256:$DIG" "$SHA refs/heads/main" "zorro=$SHA vega=$SHA"; do
+  if [ "$(red_line "$l")" = "$l" ]; then pass "redaction keeps: ${l//$SHA/<sha40>}"; else fail "redaction keeps: $l" "$(red_line "$l")"; fi
+done
+if [ "$(red_line "zorro=$SHA token_x=$SHA")" = "zorro=$SHA token_x=<redacted>" ]; then pass "redaction masks only the secret-like key's value"; else fail "redaction masks only the secret-like key's value" "$(red_line "zorro=$SHA token_x=$SHA")"; fi
+for l in "API_KEY=$SHA" "export HF_TOKEN=$DIG" "run --token $SHA x" "--api-key $SHA" "Authorization: Bearer $SHA" "Bearer $DIG" "secret: $SHA" "my api key is $SHA and $SHA" "x ${SHA}0" "x ${DIG}00 y"; do
+  if red_line "$l" | grep -Eq "[0-9a-f]{40}"; then fail "redaction masks: $l" "$(red_line "$l")"; else pass "redaction masks: ${l//$SHA/<hex>}"; fi
+done
+RP1="$("$CLI" _redact-prog)"
+LOCALRED="$(printf 'zorro=%s\nAPI_KEY=%s\n' "$SHA" "$SHA" | "$CLI" logs --host 10.0.0.1 --pod-port 2222 --probe-file /dev/stdin /workspace/sync.txt 2>&1 || true)"
+run_case "local pass keeps the commit id" 0 "zorro=$SHA" printf '%s' "$LOCALRED"
+run_case "local pass still masks API_KEY" 0 "API_KEY=<redacted>" printf '%s' "$LOCALRED"
+if printf '%s' "$("$CLI" _logs-script /workspace/x.log 5 0)" | grep -Fq "$(printf '%q' "$RP1")" && printf '%s' "$("$CLI" _probe-script)" | grep -Fq "$(printf '%q' "$RP1")"; then pass "remote scripts embed the same redaction program (single source)"; else fail "remote scripts embed the same redaction program" "differs"; fi
+RED_PASS2="$(red_line "zorro=$SHA API_KEY=$SHA" | sed -E -e "$RP1")"
+if [ "$RED_PASS2" = "zorro=$SHA API_KEY=<redacted>" ]; then pass "redaction is idempotent across the remote and local passes"; else fail "redaction is idempotent" "$RED_PASS2"; fi
+
 # opt-in: real remote script inside a locked-down local container
-if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"; fi
+if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then
+  run_case "docker: pod-side logs script executed (real roots, cap-drop ALL, no network, read-only)" 0 "0 failed" "$ROOT/tests/logs-exec.sh" docker
+  run_case "docker mutation: dropping the allowlist check fails" 1 "not ok" env LOGS_MUTATE=allowlist "$ROOT/tests/logs-exec.sh" docker
+  run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"
+fi
 
 printf '\n%d passed; %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

@@ -67,6 +67,18 @@
 #                        # READ-ONLY pod visibility over ONE ssh round trip per
 #                        # refresh (ControlMaster reuse, secrets redacted, risk
 #                        # flags). Explicit --host/--pod-port needs no RunPod API.
+#   water-spider top <pod-id> [--host H --pod-port P] [--interval N] [--once]
+#                        [--limit N] [--t0-balance USD]
+#                        # one-screen dashboard: CPU, net rx/tx, spend, top procs (N >= 5)
+#   water-spider logs <pod-id> [<path>|--sync] [--follow] [--lines N]
+#                        [--host H --pod-port P]
+#                        # read-only tail of ONE file under /workspace, /var/log or
+#                        # /tmp (--sync = /workspace/sync.txt); credential-looking
+#                        # paths refused; --follow is one long ssh, no polling
+#   water-spider watch <pod-id> --json [--interval N] [--out FILE]
+#                        [--host H --pod-port P]
+#                        # one JSON line per tick (N >= 5). --json is REQUIRED:
+#                        # `watch` without it is an error (no text mode yet)
 #   water-spider scaffold <name> [foreman-scaffold flags...]
 #                        # OPTIONAL, fleet-internal only: thin passthrough to
 #                        # foreman-scaffold (needs a sibling jokersquad
@@ -962,6 +974,10 @@ cmd_scaffold() {
 # are appended.
 #
 # Redaction program (sed -E, GNU): applied remotely AND locally; idempotent.
+# Hex runs (WATERS-033): a run of EXACTLY 40 (git/SHA-1) or 64 (SHA-256) hex
+# characters passes through (commit ids are the useful part of sync.txt), unless a
+# secret-like word (token/key/secret/pass/credential/auth/cookie/jwt/pwd) appears
+# earlier on the same line. Any other run of 40+ hex stays masked. When unsure: mask.
 ws_redact_prog() {
   cat <<'RED'
 s|(://)[^/[:space:]]*@|\1<redacted>@|g
@@ -972,7 +988,12 @@ s/(^|[[:space:]])(-p)[[:space:]]+[^0-9[:space:]<][^[:space:]]*/\1\2 <redacted>/g
 s#(Bearer|Basic|Token)[[:space:]]+[^[:space:]<]+#\1 <redacted>#Ig
 s/([A-Za-z0-9_-]*(token|key|secret|pass|auth)[A-Za-z0-9_-]*:[[:space:]]*)[^[:space:]<:][^[:space:]]*/\1<redacted>/Ig
 s/(^|[^A-Za-z0-9])(hf_|sk-|rp_|ghp_|gho_|github_pat_|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}/\1<redacted>/g
-s/(^|[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\2/g
+:h
+s/((token|key|secret|pass|credential|auth|cookie|jwt|pwd).*[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\3/Ig
+th
+:b
+s/(^|[^A-Za-z0-9])([0-9a-fA-F]{41,63}|[0-9a-fA-F]{65,})([^A-Za-z0-9]|$)/\1<redacted>\3/g
+tb
 RED
 }
 ws_redact() { sed -E -e "$(ws_redact_prog)"; }
@@ -1057,7 +1078,7 @@ ws_cm_dir() {
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then d="$XDG_RUNTIME_DIR/water-spider-cm"
   else d="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/cm"; fi
   { mkdir -p "$d" && chmod 700 "$d"; } || die "cannot create ControlMaster dir $d"
-  [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ] || die "ControlMaster dir $d must be mode 0700 and owned by you"
+  if ! { [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ]; }; then die "ControlMaster dir $d must be mode 0700 and owned by you"; fi
   printf '%s' "$d"
 }
 
@@ -1085,9 +1106,9 @@ ws_vis_resolve() {
     info="$(rp_json ssh info "$V_ID")"
     hp="$(ws_resolve_host_port "$info")"; V_HOST="${V_HOST:-${hp%%:*}}"; V_PORT="${V_PORT:-${hp##*:}}"
   fi
-  [ -n "$V_HOST" ] && [ -n "$V_PORT" ] || die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"
+  if ! { [ -n "$V_HOST" ] && [ -n "$V_PORT" ]; }; then die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"; fi
   [[ "$V_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --host: $V_HOST"
-  [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ] || die "invalid --pod-port: $V_PORT"
+  if ! { [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$V_PORT" -ge 1 ] && [ "$V_PORT" -le 65535 ]; }; then die "invalid --pod-port: $V_PORT"; fi
 }
 
 # ssh argv shared by every visibility command ($1 = ControlMaster mode).
@@ -1342,13 +1363,13 @@ cmd_pod_view() {
       *) die "$mode: unknown option '${V_REST[$i]}'" ;;
     esac
   done
-  [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ] || die "--limit must be a positive integer"
+  if ! { [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ]; }; then die "--limit must be a positive integer"; fi
   case "$mode" in
     top)   [ "$once" = 1 ] || watch="${interval:-10}" ;;
     watch) [ "$json" = 1 ] || die "watch: only --json output is implemented (pass --json)"; watch="${interval:-10}" ;;
   esac
   if [ -n "$watch" ]; then
-    [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] || die "refresh interval needs an integer N >= 5 (seconds)"
+    if ! { [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ]; }; then die "refresh interval needs an integer N >= 5 (seconds)"; fi
   fi
   [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]"
   ws_vis_resolve
@@ -1388,31 +1409,78 @@ cmd_pod_view() {
   done
 }
 
-# ---- logs (WATERS-028) -----------------------------------------------------------
+# ---- logs (WATERS-028/029/030) ---------------------------------------------------
 # Read-only tail of one file on the pod. The script goes over stdin like the
 # probe; output is redacted on the pod and again locally. --follow is ONE long
-# ssh (tail -F), no polling.
+# ssh, no polling.
+#
+# ws_logs_guard_src prints the allowlist + credential deny list as shell
+# functions. It is the SINGLE source: the pod script embeds it and runs it on the
+# `readlink -f` resolved path (and again on the opened fd, WATERS-030); the local
+# pre-check evals the same text on the literal path. Matching is case-insensitive
+# (nocasematch). A deny list layered on the allowlist; it never widens it.
+ws_logs_guard_src() {
+  cat <<'GUARD'
+ws_logs_in_roots() {
+  local p="$1" root
+  for root in $WS_LOGS_ROOTS; do
+    case "$p" in "$root"/*) return 0 ;; esac
+  done
+  return 1
+}
+ws_logs_denied() (   # subshell: nocasematch must not leak into ws_logs_in_roots
+  p="$1"
+  shopt -s nocasematch
+  case "$p" in
+    # shell / REPL / tool history
+    *_history|*/.history|*/.lesshst|*/.viminfo|*/.zhistory|*/.sh_history) return 0 ;;
+    # credential stores
+    */.netrc|*/_netrc|*/.git-credentials|*/.npmrc|*/.pypirc|*/.pgpass|*/.my.cnf|*/.dockercfg) return 0 ;;
+    # key and certificate material
+    *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.ppk|*_key|*_key.*) return 0 ;;
+    # dotenv files
+    *.env|*/.env*) return 0 ;;
+    # credential directories
+    */.git/*|*/.ssh/*|*/.aws/*|*/.config/*|*/.huggingface/*|*/.cache/huggingface/*|*/.docker/*|*/.runpod/*|*/.gnupg/*|*/.kube/*|*/.azure/*) return 0 ;;
+    # secret-looking names
+    *passw*|*secret*|*token*|*credential*|*apikey*|*api_key*|*api-key*) return 0 ;;
+  esac
+  case "${p##*/}" in
+    *.pub) return 1 ;;    # a public key is not a secret
+    id_*|*id_rsa*|*id_ed25519*|*id_ecdsa*|*id_dsa*) return 0 ;;
+  esac
+  return 1
+)
+GUARD
+}
+
 ws_logs_script() {
-  local path="$1" lines="$2" follow="$3"
+  local path="$1" lines="$2" follow="$3" roots="${4:-/workspace /var/log /tmp}"   # roots: tests only (_logs-script)
   printf 'red() { sed -u -E -e %q; }\n' "$(ws_redact_prog)"
+  printf 'WS_LOGS_ROOTS=%q\n' "$roots"
+  ws_logs_guard_src
   printf 'f=%q\n' "$path"
   printf 'n=%s\n' "$lines"
   if [ "$follow" = 1 ]; then printf 'fl=1\n'; else printf 'fl=0\n'; fi
   cat <<'REMOTE'
 main() {
-  shopt -s nocasematch
+  local r rr
   r="$(readlink -f -- "$f" 2>/dev/null)" || r=""
-  case "$r" in
-    /workspace/*|/var/log/*|/tmp/*) ;;
-    *) echo "water-spider: $f resolves to '$r', outside /workspace, /var/log, /tmp: refused" >&2; return 2 ;;
-  esac
-  case "$r" in
-    */.git/*|*/.ssh/*|*/.config/*|*/.cache/huggingface/*|*/.aws/*|*/.docker/*|*/.runpod/*|*.pem|*.key|*_key|*_key.*|*id_rsa*|*id_ed25519*|*token*|*secret*|*credential*|*.env|*/.env*|*/.netrc|*/.npmrc)
-      echo "water-spider: $r can hold credentials: refused" >&2; return 2 ;;
-  esac
+  if ! ws_logs_in_roots "$r"; then
+    echo "water-spider: $f resolves to '$r', outside the readable roots ($WS_LOGS_ROOTS): refused" >&2; return 2
+  fi
+  if ws_logs_denied "$r"; then echo "water-spider: $r can hold credentials: refused" >&2; return 2; fi
   if [ ! -f "$r" ] || [ ! -r "$r" ]; then echo "water-spider: $r is not a readable regular file on the pod" >&2; return 2; fi
-  # --pid: tail exits when the ssh session (our parent) is gone, so no tail is left behind after Ctrl-C
-  if [ "$fl" = 1 ]; then tail -n "$n" -F --pid="$PPID" -- "$r" 2>&1 | red; else tail -n "$n" -- "$r" 2>&1 | red; fi
+  # Open ONCE, then re-verify what we actually hold: a path component swapped for a
+  # symlink after the check above shows up as a different /proc/self/fd/3 target.
+  exec 3<"$r" || { echo "water-spider: cannot open $r: refused" >&2; return 2; }
+  rr="$(readlink -f -- /proc/self/fd/3 2>/dev/null)" || rr=""
+  if ! ws_logs_in_roots "$rr" || ws_logs_denied "$rr" || [ ! -f /proc/self/fd/3 ]; then
+    echo "water-spider: $r changed after the check (opened '$rr'): refused" >&2; return 2
+  fi
+  # tail reads fd 3 only (never the path again). --pid: tail exits when the ssh session (our parent)
+  # is gone, so no tail is left behind after Ctrl-C. -f follows the opened inode (not a rotated name).
+  if [ "$fl" = 1 ]; then tail -n "$n" -f --pid="$PPID" <&3 2>&1 | red; else tail -n "$n" <&3 2>&1 | red; fi
 }
 main </dev/null; exit
 REMOTE
@@ -1430,7 +1498,7 @@ cmd_logs() {
       *) die "logs: unknown option '${V_REST[$i]}'" ;;
     esac
   done
-  [[ "$lines" =~ ^[0-9]+$ ]] && [ "$lines" -ge 1 ] && [ "$lines" -le 5000 ] || die "--lines must be 1..5000"
+  if ! { [[ "$lines" =~ ^[0-9]+$ ]] && [ "$lines" -ge 1 ] && [ "$lines" -le 5000 ]; }; then die "--lines must be 1..5000"; fi
   [ "$sync" = 0 ] || { [ -z "$path" ] || die "logs: --sync and a path are exclusive"; path=/workspace/sync.txt; }
   [ -n "$V_ID$V_HOST" ] || die "usage: water-spider logs <pod-id> [<path>|--sync] [--follow] [--lines N] [--host H --pod-port P]"
   ws_vis_resolve
@@ -1445,12 +1513,13 @@ cmd_logs() {
   [[ "$path" =~ ^/[A-Za-z0-9._/@+-]+$ ]] || die "logs: path must be absolute and plain ([A-Za-z0-9._/@+-])"
   case "$path" in
     *//*|*/./*|*/.|*..*) die "logs: refusing a non-canonical path (//, /./, ..): $path" ;;
-    /workspace/*|/var/log/*|/tmp/*) ;;
-    *) die "logs: only /workspace, /var/log and /tmp are readable (refusing a path outside them): $path" ;;
   esac
-  case "$path" in
-    */.git/*|*/.ssh/*|*/.config/*|*.pem|*.key|*_key|*id_*|*.env|*/.env*|*/.netrc|*/.npmrc|*token*|*secret*|*credential*) die "logs: refusing a path that can hold credentials: $path" ;;
-  esac
+  # same guard text the pod runs (ws_logs_guard_src), here on the literal path
+  eval "$(ws_logs_guard_src)"
+  # shellcheck disable=SC2034  # read by ws_logs_in_roots (eval'd above)
+  WS_LOGS_ROOTS="/workspace /var/log /tmp"
+  ws_logs_in_roots "$path" || die "logs: only /workspace, /var/log and /tmp are readable (refusing a path outside them): $path"
+  ! ws_logs_denied "$path" || die "logs: refusing a path that can hold credentials: $path"
   if [ -n "$V_PROBE" ]; then ws_redact <"$V_PROBE"; return 0; fi   # offline: render a captured log
   ws_ssh_args "$([ "$follow" = 1 ] && echo none || echo auto)" || exit 1
   ws_logs_script "$path" "$lines" "$follow" | ssh "${WS_SSH[@]}" 'bash -s' 2>&1 | ws_redact_stream
@@ -1486,7 +1555,7 @@ case "$sub" in
   watch)     cmd_watch "$@" ;;
   _probe-script) ws_probe_script ;;   # internal: the read-only remote script (tests)
   _redact-prog)  ws_redact_prog ;;
-  _logs-script)  ws_logs_script "$@" ;;
+  _logs-script)  ws_logs_script "$@" ;;   # internal: path lines follow [roots] (roots: tests only)
   -h|--help|help) usage ;;
   *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac

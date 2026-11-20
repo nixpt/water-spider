@@ -4,9 +4,9 @@
 |-------|-------|
 | **ID** | WATERS-031 |
 | **Priority** | P1 |
-| **Status** | Open |
+| **Status** | Done (v0.8.1) |
 | **Phase** | Quality |
-| **Assignee** | — |
+| **Assignee** | ann |
 | **Dependencies** | WATERS-028 (merged, v0.8.0) |
 | **Estimated effort** | S |
 

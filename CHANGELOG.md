@@ -7,6 +7,30 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-20
+
+- Merge pull request #18 from nixpt/agent/ann/WATERS-034-ci-shellcheck
+- Merge origin/main (#17, v0.8.2) into WATERS-034
+- WATERS-034: docs command scans only shell files
+- WATERS-034: fix CI ShellCheck (SC2015 under the pinned v0.10.0)
+
+
+
+## [0.8.2] - 2026-11-20
+
+- Merge pull request #17 from nixpt/agent/ann/WATERS-032-033-help-redaction
+- Merge origin/main (#16 logs hardening) into WATERS-032/033
+- WATERS-032/033: --help lists all commands; redaction keeps commit ids
+
+
+
+## [0.8.1] - 2026-11-20
+
+- Merge pull request #16 from nixpt/agent/ann/WATERS-031-029-030-logs-hardening
+- WATERS-029/030/031: logs hardening (deny list, fd-checked read, executed allowlist tests)
+
+
+
 ## [0.8.0] - 2026-11-20
 
 - Merge pull request #14 from nixpt/agent/ann/WATERS-028-pod-top-logs-watch
