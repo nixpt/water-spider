@@ -67,6 +67,16 @@ water-spider gpu POD-ID [--host H --pod-port P] [--watch N]
 Read-only pod visibility over one ssh round trip; see
 [operations](operations.md#pod-visibility). `--watch` needs N >= 5.
 
+### `top` / `logs` / `watch`
+
+```sh
+water-spider top  POD-ID [--host H --pod-port P] [--interval N] [--once] [--limit N] [--t0-balance USD]
+water-spider logs POD-ID [PATH|--sync] [--follow] [--lines N] [--host H --pod-port P]
+water-spider watch POD-ID --json [--interval N] [--out FILE] [--host H --pod-port P]
+```
+
+Read-only; see [operations](operations.md#pod-visibility). Intervals need N >= 5.
+
 ### `tunnel`
 
 ```sh

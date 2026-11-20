@@ -191,6 +191,75 @@ if printf '%s' "$DEG" | grep -Eq 'sk-ABCDEFGH|hunter2|rp_ABCDEFGH'; then fail "r
 printf '%s' "$DEG" > "$TEST_TMP/deg.txt"
 run_case "ps renders degraded probe" 0 "gpu: nvidia-smi absent" "$CLI" ps --probe-file "$TEST_TMP/deg.txt"
 
+# --- pod visibility part 2 (WATERS-028): top / logs / watch ---
+FX="$ROOT/tests/fixtures"
+run_case "top --once shows net, cpu and spend" 0 "net (non-lo): rx 2.8 GiB  tx 476.8 MiB" env FAKE_SSH_PROBE_FILE="$FX/probe-risky.txt" "$CLI" top --host 10.0.0.1 --pod-port 2222 --once
+run_case "top shows spend since T0 from the balance" 0 "spend: \$0.00 since T0" env FAKE_SSH_PROBE_FILE="$FX/probe-risky.txt" "$CLI" top --host 10.0.0.1 --pod-port 2222 --once
+run_case "top --t0-balance computes spend" 0 "spend: \$2.50 since T0" env FAKE_SSH_PROBE_FILE="$FX/probe-risky.txt" "$CLI" top --host 10.0.0.1 --pod-port 2222 --once --t0-balance 12.5
+TOPNO="$(env FAKE_RUNPOD_MODE=api-fail FAKE_SSH_PROBE_FILE="$FX/probe-risky.txt" "$CLI" top --host 10.0.0.1 --pod-port 2222 --once 2>&1)"
+if printf '%s' "$TOPNO" | grep -q 'spend:'; then fail "top omits spend without the API" "$TOPNO"; else pass "top omits spend without the API"; fi
+run_case "top still renders without the API" 0 "cpu used: needs two samples" printf '%s' "$TOPNO"
+run_case "top shows only CPU-sorted top procs" 0 "top 8 by CPU" printf '%s' "$TOPNO"
+run_case "top interval below 5 refused" 1 ">= 5" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 3
+run_case "top loops with bounded ticks" 0 "refresh every 5s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
+WOUT="$TEST_TMP/watch.jsonl"; rm -f "$WOUT"
+WJ="$(env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_PROBE_FILE="$FX/probe-risky.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json --interval 5 --out "$WOUT" 2>&1)"
+if [ "$(printf '%s\n' "$WJ" | grep -c '^{')" -eq 2 ] && [ "$(wc -l <"$WOUT")" -eq 2 ]; then pass "watch emits one JSON line per tick and appends to --out"; else fail "watch emits one JSON line per tick" "$WJ"; fi
+if [ "$(stat -c %a "$WOUT")" = 600 ]; then pass "watch --out is mode 0600"; else fail "watch --out is mode 0600" "$(stat -c %a "$WOUT")"; fi
+J1="$(head -1 "$WOUT")"
+run_case "watch JSON has gpu vram" 0 "23900" jq -c '.gpus[0].vram_used_mib' <<<"$J1"
+run_case "watch JSON joins pid to vram" 0 "23800" jq -c '.procs[] | select(.pid==4242) | .vram_mib' <<<"$J1"
+run_case "watch JSON cgroup mem" 0 "21474836480" jq -c '.mem.current_bytes' <<<"$J1"
+run_case "watch JSON disk" 0 "95" jq -c '.disk[] | select(.mount=="/") | .used_pct' <<<"$J1"
+run_case "watch JSON net" 0 "3000000000" jq -c '.net.rx_bytes' <<<"$J1"
+run_case "watch JSON listeners" 0 "jupyter" jq -c '[.listeners[] | select(.exposure=="PUBLIC") | .process] | join(" ")' <<<"$J1"
+run_case "watch JSON spend object" 0 "balance_usd" jq -c '.spend' <<<"$J1"
+run_case "watch JSON flags" 0 "PUBLIC listener" jq -c '.flags | join(" ")' <<<"$J1"
+if printf '%s' "$WJ" | grep -Eq 'abc123supersecret|hf_AbCdEf0123456789'; then fail "watch JSON hides secrets" "$WJ"; else pass "watch JSON hides secrets"; fi
+run_case "watch needs --json" 1 "pass --json" "$CLI" watch --host 10.0.0.1 --pod-port 2222
+SSHLOG2="$TEST_TMP/ssh2.log"; : > "$SSHLOG2"
+LOGOUT="$(env FAKE_SSH_LOG="$SSHLOG2" FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/results/run.log 2>&1)"
+run_case "logs tails the path read-only" 0 "last line" printf '%s' "$LOGOUT"
+run_case "logs redacts output" 0 "HF_TOKEN=<redacted> started" printf '%s' "$LOGOUT"
+run_case "logs script targets the path" 0 "/workspace/results/run.log" cat "$SSHLOG2"
+env FAKE_SSH_LOG="$SSHLOG2" FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --sync >/dev/null 2>&1
+run_case "logs --sync reads /workspace/sync.txt" 0 "/workspace/sync.txt" cat "$SSHLOG2"
+env FAKE_SSH_LOG="$SSHLOG2" FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --sync --follow >/dev/null 2>&1
+run_case "logs --follow uses a dedicated connection (ControlPath=none)" 0 "ControlPath=none" cat "$SSHLOG2"
+run_case "logs --follow tail exits with the ssh session (--pid)" 0 "--pid=" cat "$SSHLOG2"
+run_case "logs script resolves symlinks and re-checks the allowlist" 0 'readlink -f' cat "$SSHLOG2"
+run_case "logs --follow script uses tail -F" 0 "tail -n" cat "$SSHLOG2"
+run_case "logs refuses credential paths" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/.ssh/id_ed25519
+run_case "logs refuses proc environ" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /proc/1/environ
+run_case "logs refuses //proc" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 //proc/1/environ
+run_case "logs refuses /./ forms" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/./x.log
+run_case "logs refuses /etc/shadow (outside allowlist)" 1 "outside" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /etc/shadow
+run_case "logs refuses ssh host keys" 1 "outside" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /etc/ssh/ssh_host_ed25519_key
+run_case "logs refuses .git/config" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/repo/.git/config
+run_case "logs refuses token files" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/hf_token.txt
+run_case "logs refuses traversal" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/../etc/passwd
+run_case "logs refuses odd characters" 1 "plain" "$CLI" logs --host 10.0.0.1 --pod-port 2222 '/workspace/a;b'
+run_case "logs --follow needs a path" 1 "needs a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --follow
+LS="$("$CLI" _logs-script /workspace/x.log 50 1)"
+# padded df (real `df -P`) must still yield / and /workspace in the JSON
+PADDED="$TEST_TMP/probe-padded.txt"
+awk '/^@@WS:disk@@/{print; print "Filesystem     1024-blocks      Used Available Capacity Mounted on"; print "overlay           31457280    920000  30537280       3% /"; print "mfs             1048576000 104857600 943718400      10% /workspace"; skip=1; next} /^@@WS:/{skip=0} !skip' "$FX/probe-clean.txt" > "$PADDED"
+run_case "watch JSON disk parses padded df" 0 '["/","/workspace"]' jq -c '[.disk[].mount]' <<<"$(env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FILE="$PADDED" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json)"
+# --out: pre-existing wide file is tightened; symlink refused
+echo old > "$TEST_TMP/wide.jsonl"; chmod 644 "$TEST_TMP/wide.jsonl"
+env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json --out "$TEST_TMP/wide.jsonl" >/dev/null
+if [ "$(stat -c %a "$TEST_TMP/wide.jsonl")" = 600 ]; then pass "watch --out tightens an existing file to 0600"; else fail "watch --out tightens an existing file to 0600" "$(stat -c %a "$TEST_TMP/wide.jsonl")"; fi
+ln -sf "$TEST_TMP/wide.jsonl" "$TEST_TMP/link.jsonl"
+run_case "watch --out refuses a symlink" 1 "non-symlink" env FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json --out "$TEST_TMP/link.jsonl"
+run_case "watch failed tick emits an error line" 0 '"error":"probe failed"' env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FAIL=1 FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json
+# rate math: two ticks with different timestamps/counters
+SEQ1="$TEST_TMP/seq1.txt"; SEQ2="$TEST_TMP/seq2.txt"
+sed 's/^ts=.*/ts=1000/' "$FX/probe-clean.txt" > "$SEQ1"
+sed 's/^ts=.*/ts=1010/; s/^cpu_usec=.*/cpu_usec=25000000/; s/3000000000 100/3100000000 100/' "$FX/probe-clean.txt" > "$SEQ2"
+run_case "top computes rx rate and cpu use across ticks" 0 "rx 10.00 MB/s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
+run_case "top cpu used across ticks" 0 "cpu used: 2.00 vCPU" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr2" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
+if printf '%s' "$LS" | grep -Eq '(^|[^A-Za-z_-])(kill|rm|mv|cp|tee|mkdir|touch|chmod|curl|wget|dd)[[:space:]]|environ|<<'; then fail "logs script is read-only" "$LS"; else pass "logs script is read-only"; fi
+
 # opt-in: real remote script inside a locked-down local container
 if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"; fi
 

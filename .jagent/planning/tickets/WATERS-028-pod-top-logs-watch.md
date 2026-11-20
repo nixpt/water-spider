@@ -4,11 +4,17 @@
 |-------|-------|
 | **ID** | WATERS-028 |
 | **Priority** | P1 |
-| **Status** | Open |
+| **Status** | In Review |
 | **Phase** | Operations |
 | **Assignee** | ann |
 | **Dependencies** | WATERS-027 |
 | **Estimated effort** | M |
+
+## Success criteria (all met, fakes + live one-shot smoke)
+
+- [x] top, logs (+ --sync, --follow), watch --json (+ --out).
+- [x] Redaction, flags, one round trip per tick, ControlMaster, read-only, tests without a pod.
+- [ ] MCP control-profile tools for ps/gpu/watch (follow-up).
 
 ## Scope
 

@@ -52,6 +52,23 @@ Flags (a warning line at the end): public listener other than sshd, GPU process
 with no identifiable/live parent (also shown when the container cannot see
 host-pid compute apps), `/` or `/workspace` over 90%, VRAM over 95%. The GPU
 query fields start with the MCP `gpu_status` set so both surfaces agree.
+More views, same rules (one round trip per tick, ControlMaster, read-only, redaction):
+
+```sh
+water-spider top POD-ID [--interval N] [--once] [--t0-balance USD]   # one-screen dashboard, N >= 5
+water-spider logs POD-ID /workspace/results/run.log [--lines N]      # read-only tail
+water-spider logs POD-ID --sync --follow                              # /workspace/sync.txt, one long ssh
+water-spider watch POD-ID --json [--interval N] [--out FILE]          # one JSON line per tick
+```
+
+`top` adds container CPU use (cgroup usage delta), net rx/tx (non-loopback) and, when the
+RunPod API answers, spend since T0 (the first balance seen, or `--t0-balance`); it is omitted
+otherwise. `logs` refuses paths that can hold credentials (`.ssh`, `/proc`, `*.pem`, `.env`, ...)
+and requires a plain absolute path. `watch --json` emits ps + gpu + mem + disk + net + listeners
++ spend + flags per tick (stdout, and appended to `--out`, mode 0600) for guards and a future
+command-center panel. Redaction is best effort: attached short options (`-pSECRET`) and
+unquoted spaced values can leak, and any 40+ hex run (git SHAs, digests) is masked on purpose.
+
 Tests: `tests/run.sh` (fakes) and `WS_TEST_DOCKER=1 tests/run.sh` (real remote
 script in a locked-down container).
 
