@@ -68,12 +68,19 @@ and refuses paths that can hold credentials. The deny list is case-insensitive a
 the allowlist (it never widens it): shell and REPL history (`*_history`, `.lesshst`, `.viminfo`),
 `.netrc`, `.git-credentials`, `.npmrc`, `.pypirc`, `.pgpass`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.jks`,
 non-`.pub` `id_*`, `.env*`, anything under `.ssh/`, `.aws/`, `.config/`, `.huggingface/`, `.git/`,
-and any name containing `passw`, `secret`, `token` or `credential`. It runs locally on the literal
+and any name containing `passw`, `secret`, `token` or `credential`. WATERS-035 adds `authorized_keys`,
+`known_hosts`, `.gitconfig`, `*.kdbx`, `*.tfstate`, `*.tfstate.backup`, `*.tfvars`, `*kubeconfig*`,
+anything under `.kube/`, `*-sa.json`, `service-account*.json`, `application_default_credentials.json`,
+`.boto`, `.s3cfg`, `.docker/config.json`, and under `/var/log` the login records `btmp`, `wtmp`,
+`lastlog`, `faillog`, `auth.log*` and `secure*`. It runs locally on the literal
 path and again on the pod on the `readlink -f` resolved path, from one shared text
 (`ws_logs_guard_src`), so a symlink into a denied file is refused. On the pod the script opens the
 file once (fd 3), re-checks that `/proc/self/fd/3` still resolves inside the allowlist and passes the
 deny list, and then `tail` reads fd 3 only (no re-open of the path, so a symlink swapped in after the
-check cannot redirect the read). `--follow` uses `tail -f --pid` on that fd: it follows the opened
+check cannot redirect the read). The open itself is bounded (WATERS-036): a FIFO or device swapped in
+after the `-f` check would block `exec 3<` until a writer appears, so a bash watchdog (`sleep`, present
+everywhere bash is) TERMs the script after `WS_LOGS_OPEN_TIMEOUT` seconds (default 5) and it refuses with
+"not a regular file, or the open timed out"; the fd check still refuses FIFOs and devices that open at once. `--follow` uses `tail -f --pid` on that fd: it follows the opened
 inode, so after a log rotation re-run `logs`; the tail exits with the ssh session. `watch` requires `--json` (no text mode yet; without it the command errors). `watch --json` emits ps + gpu + mem + disk + net + listeners
 + spend + flags per tick (stdout, and appended to `--out`, mode 0600) for guards and a future
 command-center panel. Redaction is best effort: attached short options (`-pSECRET`) and

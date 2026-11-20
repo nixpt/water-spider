@@ -1440,6 +1440,14 @@ ws_logs_denied() (   # subshell: nocasematch must not leak into ws_logs_in_roots
     *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore|*.ppk|*_key|*_key.*) return 0 ;;
     # dotenv files
     *.env|*/.env*) return 0 ;;
+    # ssh trust files, git config (credential helpers, insteadOf tokens), password stores
+    */authorized_keys|*/known_hosts|*/.gitconfig|*.kdbx) return 0 ;;
+    # terraform state and variables, kubernetes config
+    *.tfstate|*.tfstate.backup|*.tfvars|*kubeconfig*|*/.kube/*) return 0 ;;
+    # cloud credentials
+    *-sa.json|*service-account*.json|*/application_default_credentials.json|*/.boto|*/.s3cfg|*/.docker/config.json) return 0 ;;
+    # login and auth records
+    */var/log/btmp*|*/var/log/wtmp*|*/var/log/lastlog*|*/var/log/auth.log*|*/var/log/secure*|*/var/log/faillog*) return 0 ;;
     # credential directories
     */.git/*|*/.ssh/*|*/.aws/*|*/.config/*|*/.huggingface/*|*/.cache/huggingface/*|*/.docker/*|*/.runpod/*|*/.gnupg/*|*/.kube/*|*/.azure/*) return 0 ;;
     # secret-looking names
@@ -1473,7 +1481,16 @@ main() {
   if [ ! -f "$r" ] || [ ! -r "$r" ]; then echo "water-spider: $r is not a readable regular file on the pod" >&2; return 2; fi
   # Open ONCE, then re-verify what we actually hold: a path component swapped for a
   # symlink after the check above shows up as a different /proc/self/fd/3 target.
-  exec 3<"$r" || { echo "water-spider: cannot open $r: refused" >&2; return 2; }
+  # WATERS-036: a FIFO or device swapped in after the -f check would block this open until a writer
+  # appears. Bash has no O_NONBLOCK open and no helper is guaranteed on the pod, so the open is bounded
+  # by a watchdog (pure bash + sleep): after WS_LOGS_OPEN_TIMEOUT s (default 5) it TERMs this shell, whose
+  # trap refuses. The path is never opened a second time.
+  local wd me=$$
+  trap 'echo "water-spider: $r: refused: not a regular file, or the open timed out" >&2; exit 2' TERM
+  ( trap 'kill "$s" 2>/dev/null; exit 0' TERM; sleep "${WS_LOGS_OPEN_TIMEOUT:-5}" & s=$!; wait "$s"; kill -TERM "$me" 2>/dev/null ) &
+  wd=$!
+  if ! exec 3<"$r"; then kill "$wd" 2>/dev/null; trap - TERM; echo "water-spider: cannot open $r: refused" >&2; return 2; fi
+  kill "$wd" 2>/dev/null; trap - TERM
   rr="$(readlink -f -- /proc/self/fd/3 2>/dev/null)" || rr=""
   if ! ws_logs_in_roots "$rr" || ws_logs_denied "$rr" || [ ! -f /proc/self/fd/3 ]; then
     echo "water-spider: $r changed after the check (opened '$rr'): refused" >&2; return 2
