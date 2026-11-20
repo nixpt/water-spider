@@ -7,6 +7,12 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-20
+
+- WATERS-035/036: logs deny-list gaps + non-blocking fd open (#19)
+
+
+
 ## [0.8.3] - 2026-11-20
 
 - Merge pull request #18 from nixpt/agent/ann/WATERS-034-ci-shellcheck
