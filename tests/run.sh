@@ -128,6 +128,7 @@ run_case "ps shows cgroup mem and cpu, not host" 0 "mem 20.0 GiB / 64.0 GiB (31%
 run_case "ps clean pod has no flags" 0 "ok: no risk flags" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
 run_case "gpu summary and per-process VRAM" 0 "4242     root       23800" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222
 run_case "gpu summary line" 0 "util 91%  VRAM 23900/24564 MiB  pwr 410.20/450.00 W  temp 71C  SM 2520 MHz  mem 10501 MHz" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222
+run_case "gpu also flags public listeners" 0 "PUBLIC listener 0.0.0.0:8888 owned by jupyter" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222
 run_case "gpu --watch below 5 refused" 1 "N >= 5" "$CLI" gpu --host 10.0.0.1 --pod-port 2222 --watch 4
 run_case "gpu --watch runs bounded ticks" 0 "refresh every 5s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222 --watch 5
 run_case "ps resolves a bare pod id like connect" 0 "pod pod-1" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps pod-1

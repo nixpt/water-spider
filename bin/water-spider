@@ -1195,10 +1195,14 @@ ws_vis_render() {
           printf "%d\t%s\t   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n", vk, $5, substr($1,1,10), $2, $3, el($4), $5, sprintf("%.0fM",$6/1024), vr, c }' "$t/ps" \
         | sort -t "$(printf '\t')" -k1,1nr -k2,2nr | head -n "$limit" | cut -f3-
     fi
+  fi
+  # listeners: shown by ps; flags are computed for both views
+  local mode_ l; mode_="$(kv "$t/ls" mode)"
+  if [ "$mode" = ps ]; then
     echo "-- listening sockets"
-    local mode_ l; mode_="$(kv "$t/ls" mode)"
     printf '   %-9s %-28s %-8s %s\n' EXPOSURE ADDRESS PORT PROCESS
-    while read -r l; do
+  fi
+  while read -r l; do
       local la="" pr="" st="" rest
       case "$mode_" in
         ss)      read -r st _ _ la _ pr <<<"$l"; [ "$st" = LISTEN ] || continue ;;
@@ -1213,13 +1217,12 @@ ws_vis_render() {
       local pname="$pr"
       [[ "$pr" =~ \(\(\"([^\"]+)\" ]] && pname="${BASH_REMATCH[1]}"
       [[ "$pr" =~ ^[0-9]+/(.+)$ ]] && pname="${BASH_REMATCH[1]}"
-      printf '   %-9s %-28s %-8s %s\n' "$exp" "${addr:-*}" "$port" "$pr"
+      [ "$mode" != ps ] || printf '   %-9s %-28s %-8s %s\n' "$exp" "${addr:-*}" "$port" "$pr"
       if [ "$exp" = PUBLIC ] && [ "${pname#sshd}" = "$pname" ]; then
         if [ "$pname" = "-" ]; then echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") (owner unknown: ${mode_} gave no process info), not shown to be sshd" >>"$flags"
         else echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") owned by $pname (not sshd)" >>"$flags"; fi
       fi
-    done < <(grep -v '^mode=' "$t/ls")
-  fi
+  done < <(grep -v '^mode=' "$t/ls")
 
   # disk
   echo "-- disk"
