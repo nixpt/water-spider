@@ -51,6 +51,16 @@ for n in PASSWORD.txt .bash_history .zsh_history .python_history .lesshst .NETRC
   echo fake-credential-fixture > "\$W/\$n"
 done
 ln -s "\$W/.bash_history" "\$W/innocent.log"
+# WATERS-035: more credential/security files, plus benign neighbours
+mkdir -p "\$W/.kube" "\$W/.docker" "\$W/nginx" "\$W/tf" 2>/dev/null
+for n in .ssh/authorized_keys .ssh2_dummy AUTHORIZED_KEYS known_hosts .gitconfig db.kdbx tf/terraform.tfstate tf/terraform.tfstate.backup \\
+         tf/prod.TFVARS kubeconfig .kube/config sa-key-sa.json service-account-prod.json application_default_credentials.json \\
+         .boto .s3cfg .docker/config.json race2.log; do
+  echo fake-credential-fixture > "\$W/\$n"
+done
+ln -s "\$W/tf/terraform.tfstate" "\$W/innocent-state.log"; ln -s "\$W/.kube/config" "\$W/innocent-kube.log"
+echo app-line > "\$W/app.log"; echo train-line > "\$W/train.log"; echo nginx-line > "\$W/nginx/access.log"
+[ "$MODE" = docker ] || { echo syslog-line > "\$L/syslog"; mkdir -p "\$L/nginx"; echo nginx-var-line > "\$L/nginx/access.log"; }
 echo race-target > "\$W/results/race.log"
 mkdir -p "\$T/shim"
 cat > "\$T/shim/readlink" <<'SHIM'
@@ -60,6 +70,18 @@ if [ -n "\${RACE_FLAG:-}" ] && [ ! -e "\$RACE_FLAG" ]; then : > "\$RACE_FLAG"; l
 printf '%s\n' "\$out"; exit \$rc
 SHIM
 chmod +x "\$T/shim/readlink"
+# WATERS-036: swap window between the open and the fd re-check: on the 2nd readlink (the /proc/self/fd/3 one)
+# the opened file is renamed to a denied name, so the fd now resolves to a path the deny list refuses
+sed -i '2i if [ -n "\${RACE2_TO:-}" ]; then c="\$(cat "\$RACE2_CNT" 2>/dev/null || echo 0)"; c=\$((c+1)); echo "\$c" > "\$RACE2_CNT"; [ "\$c" = 2 ] \&\& mv -f "\$RACE2_FROM" "\$RACE2_TO"; fi' "\$T/shim/readlink"
+# WATERS-036: between the check and the open, swap the target for a FIFO. Overriding the \`[\` builtin with a
+# function (loaded through BASH_ENV) is the only seam between the -r check and the open.
+cat > "\$T/shim/hook.sh" <<'HOOK'
+[() { builtin '[' "\$@"; local rc=\$?
+  if [[ -n \${FIFO_TARGET:-} && \${2:-} == -r && \${3:-} == "\$FIFO_TARGET" && ! -e \${FIFO_FLAG:-/nonexistent} ]]; then
+    : > "\$FIFO_FLAG"; /bin/rm -f "\$FIFO_TARGET"; /usr/bin/mkfifo "\$FIFO_TARGET"
+  fi
+  return \$rc; }
+HOOK
 SETUP
 }
 
@@ -113,8 +135,36 @@ for d in PASSWORD.txt .bash_history .zsh_history .python_history .lesshst .NETRC
          Id_Rsa x.PEM s.KEY .env .env.local My_Secret.log .ssh/config .aws/credentials .config/gcloud/a.db .huggingface/hf innocent.log; do
   expect refuse "can hold credentials" "$W/$d"
 done
+for d in .ssh/authorized_keys AUTHORIZED_KEYS known_hosts .gitconfig db.kdbx tf/terraform.tfstate tf/terraform.tfstate.backup \
+         tf/prod.TFVARS kubeconfig .kube/config sa-key-sa.json service-account-prod.json application_default_credentials.json \
+         .boto .s3cfg .docker/config.json innocent-state.log innocent-kube.log; do
+  expect refuse "can hold credentials" "$W/$d"
+done
+for d in btmp wtmp lastlog auth.log auth.log.1 secure secure-20261101 BTMP; do   # login records need no fixture: the deny list runs first
+  expect refuse "can hold credentials" "$L/$d"
+done
+expect ok app-line "$W/app.log"
+expect ok train-line "$W/train.log"
+expect ok nginx-line "$W/nginx/access.log"
+if [ "$MODE" = bash ]; then expect ok syslog-line "$L/syslog"; expect ok nginx-var-line "$L/nginx/access.log"; fi
 # WATERS-030: the resolved file is swapped for a symlink to /etc/os-release between the check and the open
 expect refuse "changed after the check" "$W/results/race.log" "export PATH=$T/shim:\$PATH RACE_FLAG='$T/race.flag' RACE_TARGET='$W/results/race.log'"
+
+# WATERS-036: a FIFO swapped in between the check and the open. The open must not block forever: refused
+# within a few seconds, and (bash mode) nothing of ours left running.
+MARK="logs-exec-$$-$RANDOM"
+orphans() { local p c=0; for p in /proc/[0-9]*; do [ "$p" = "/proc/$$" ] && continue; { tr '\0' '\n' < "$p/environ"; } 2>/dev/null | grep -Fxq "LOGS_MARK=$MARK" && c=$((c + 1)); done; echo "$c"; }
+t0=$SECONDS
+expect refuse "not a regular file, or the open timed out" "$W/results/fifo.log" \
+  "echo race-target > '$W/results/fifo.log'; export LOGS_MARK=$MARK BASH_ENV=$T/shim/hook.sh WS_LOGS_OPEN_TIMEOUT=2 FIFO_TARGET='$W/results/fifo.log' FIFO_FLAG='$T/fifo.flag'"
+dt=$((SECONDS - t0)); n=$((n + 1))
+if [ "$dt" -le 6 ]; then echo "ok - [$MODE] FIFO swap: refused in ${dt}s"; else echo "not ok - [$MODE] FIFO swap took ${dt}s"; fails=$((fails + 1)); fi
+if [ "$MODE" = bash ]; then
+  sleep 1; n=$((n + 1)); o="$(orphans)"
+  if [ "$o" = 0 ]; then echo "ok - [bash] FIFO swap: no orphan bash/tail/sleep"; else echo "not ok - [bash] FIFO swap left $o processes"; fails=$((fails + 1)); fi
+fi
+# WATERS-036: swap between the open and the fd re-check (the opened file is renamed to a denied name)
+expect refuse "changed after the check" "$W/race2.log" "export PATH=$T/shim:\$PATH RACE2_CNT='$T/race2.cnt' RACE2_FROM='$W/race2.log' RACE2_TO='$W/moved.tfstate'"
 
 # --follow must not leave a tail behind once its parent (the ssh session) is gone
 if [ "$MODE" = bash ] && [ -z "${LOGS_MUTATE:-}" ]; then

@@ -93,6 +93,7 @@ For the GPU image, follow the dedicated
 - Use `--idempotency-key` anywhere a request may be repeated.
 - Pull valuable artifacts before teardown; pod storage is not a backup.
 - `snapshot` records a lightweight model/provenance manifest, not disk bytes.
+- `logs` reads one file under `/workspace`, `/var/log` or `/tmp` and refuses names that can hold credentials, case-insensitively: history files, `.netrc`/`.git-credentials`/`.npmrc`/`.pypirc`, keys and certificates, `.env*`, `.ssh`/`.aws`/`.kube`/`.docker` contents, `authorized_keys`, `known_hosts`, `.gitconfig`, `*.kdbx`, `*.tfstate(.backup)`, `*.tfvars`, `kubeconfig`, service-account and `application_default_credentials.json`, `.boto`, `.s3cfg`, and `/var/log` `btmp`/`wtmp`/`lastlog`/`auth.log*`/`secure*` (full list in [operations](docs/operations.md)).
 - Live RunPod usage is billable. Tests never use credentials or real resources.
 
 Read [common workflows](docs/workflows.md) before automating creation,

@@ -250,7 +250,7 @@ run_case "logs script: fd 3 re-verified, tail reads fd 3" 0 'readlink -f -- /pro
 run_case "pod-side logs script executed under bash (allowlist, deny list, race, no orphan tail)" 0 "0 failed" "$ROOT/tests/logs-exec.sh" bash
 run_case "mutation: dropping the allowlist check fails the suite" 1 "not ok" env LOGS_MUTATE=allowlist "$ROOT/tests/logs-exec.sh" bash
 run_case "mutation: dropping the deny list fails the suite" 1 "not ok" env LOGS_MUTATE=deny "$ROOT/tests/logs-exec.sh" bash
-run_case "mutation: dropping the fd re-check fails the suite" 1 "changed after the check" env LOGS_MUTATE=fdcheck "$ROOT/tests/logs-exec.sh" bash
+run_case "mutation: dropping the fd re-check fails the suite" 1 "not ok" env LOGS_MUTATE=fdcheck "$ROOT/tests/logs-exec.sh" bash
 LS="$("$CLI" _logs-script /workspace/x.log 50 1)"
 # padded df (real `df -P`) must still yield / and /workspace in the JSON
 PADDED="$TEST_TMP/probe-padded.txt"
@@ -269,7 +269,9 @@ sed 's/^ts=.*/ts=1000/' "$FX/probe-clean.txt" > "$SEQ1"
 sed 's/^ts=.*/ts=1010/; s/^cpu_usec=.*/cpu_usec=25000000/; s/3000000000 100/3100000000 100/' "$FX/probe-clean.txt" > "$SEQ2"
 run_case "top computes rx rate and cpu use across ticks" 0 "rx 10.00 MB/s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
 run_case "top cpu used across ticks" 0 "cpu used: 2.00 vCPU" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr2" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
-if printf '%s' "$LS" | grep -Eq '(^|[^A-Za-z_-])(kill|rm|mv|cp|tee|mkdir|touch|chmod|curl|wget|dd)[[:space:]]|environ|<<'; then fail "logs script is read-only" "$LS"; else pass "logs script is read-only"; fi
+# WATERS-036: the open watchdog may kill only its own pids ($wd, $s, $me); any other kill still fails this check
+# shellcheck disable=SC2016  # the sed program is literal
+if printf '%s' "$LS" | sed -E 's/kill (-TERM )?"\$(wd|s|me)"//g' | grep -Eq '(^|[^A-Za-z_-])(kill|rm|mv|cp|tee|mkdir|touch|chmod|curl|wget|dd)[[:space:]]|environ|<<'; then fail "logs script is read-only" "$LS"; else pass "logs script is read-only"; fi
 
 # --- WATERS-032: --help covers every dispatched subcommand (can't drift) ---
 HELP="$("$CLI" --help 2>&1)"
