@@ -158,6 +158,10 @@ run_case "redaction keeps ordinary flags" 0 "-p 8080 --model x.gguf" bash -c "pr
 run_case "broken ControlMaster dir fails closed" 1 "cannot create ControlMaster dir" env XDG_RUNTIME_DIR=/proc FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
 run_case "bad pod id refused before API call" 1 "invalid pod id" "$CLI" ps 'a;b'
 run_case "bad port refused" 1 "invalid --pod-port" "$CLI" ps --host 10.0.0.1 --pod-port 70000
+# many processes + small --limit: head closes the pipe early (SIGPIPE under pipefail must not abort)
+BIG="$TEST_TMP/probe-big.txt"
+awk '/^@@WS:ps@@/{print; for(i=0;i<3000;i++) printf "root %d 1 100 0.%d 1024 /usr/bin/worker --id %d\n", 1000+i, i%10, i; skip=1; next} /^@@WS:/{skip=0} !skip' "$ROOT/tests/fixtures/probe-clean.txt" > "$BIG"
+run_case "ps with thousands of procs and --limit 2 survives SIGPIPE" 0 "3000 total, top 2" env FAKE_SSH_PROBE_FILE="$BIG" "$CLI" ps --host 10.0.0.1 --pod-port 2222 --limit 2
 # the single ssh call: stdin script, ControlMaster, BatchMode, one round trip
 nssh="$(grep -c '^ARGV:' "$SSHLOG")"
 if [ "$nssh" -eq 1 ]; then pass "ps makes exactly one ssh call"; else fail "ps makes exactly one ssh call" "got $nssh"; fi

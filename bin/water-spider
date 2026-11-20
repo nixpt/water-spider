@@ -1198,7 +1198,7 @@ ws_vis_render() {
         { c=""; for(i=7;i<=NF;i++) c=c (i>7?" ":"") $i; if(length(c)>w) c=substr(c,1,w-3) "...";
           vr=($2 in v)?v[$2]:"-"; vk=($2 in v)?((v[$2]+0)+1):0;
           printf "%d\t%s\t   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n", vk, $5, substr($1,1,10), $2, $3, el($4), $5, sprintf("%.0fM",$6/1024), vr, c }' "$t/ps" \
-        | sort -t "$(printf '\t')" -k1,1nr -k2,2nr | head -n "$limit" | cut -f3-
+        | sort -t "$(printf '\t')" -k1,1nr -k2,2nr | head -n "$limit" | cut -f3- || true   # head may close early: SIGPIPE must not abort under pipefail
     fi
   fi
   # listeners: shown by ps; flags are computed for both views
