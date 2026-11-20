@@ -666,7 +666,7 @@ cmd_tunnel() {
   for p in "${ports[@]}"; do dashL+=(-L "${p%%:*}:localhost:${p##*:}"); done
 
   echo "==> tunneling ${ports[*]} to $host:$port (background)"
-  ssh -f -N "${dashL[@]}" -p "$port" -i "$SSH_KEY" -o ExitOnForwardFailure=yes "root@$host" \
+  ssh -f -N "${dashL[@]}" -p "$port" -i "$SSH_KEY" -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "root@$host" \
     || die "ssh tunnel failed to establish — check host/port/key are right (water-spider connect $id)"
   # ssh -f forks and the parent exits immediately; find the child by matching
   # our exact invocation rather than trusting $! (which is the already-exited
