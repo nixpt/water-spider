@@ -40,6 +40,7 @@ full details on each `WATERS-N` ID.
 
 ## P2 — Project Metadata
 
+- [ ] [WATERS-039](tickets/WATERS-039-logs-watchdog-test-hardening.md) — logs: harden the watchdog tests, #19 review follow-ups (P2, ann)
 - [ ] [WATERS-037](tickets/WATERS-037-logs-docs-limits.md) — docs: state the logs guard's known limits (P3, ann)
 - [x] [WATERS-032](tickets/WATERS-032-help-visibility-commands.md) — --help lists top, logs and watch
 - [x] [WATERS-030](tickets/WATERS-030-logs-toctou.md) — logs: close the readlink-to-tail race
