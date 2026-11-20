@@ -7,6 +7,17 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-20
+
+- Merge pull request #13 from nixpt/agent/ann/WATERS-027-pod-ps-gpu
+- fix: ps survives SIGPIPE when head closes early on large process tables (WATERS-027)
+- fix: address usagi review (redaction gaps+idempotency, fail-closed ControlMaster dir, remote timeouts, id/port validation) (WATERS-027)
+- fix: gpu view also computes listener risk flags (WATERS-027)
+- style: shellcheck clean (WATERS-027)
+- feat: pod visibility ps + gpu, read-only over one ssh round trip (WATERS-027)
+
+
+
 ## [0.6.6] - 2026-11-20
 
 - Merge pull request #12 from nixpt/agent/ann/WATERS-025-a6000-recipe
