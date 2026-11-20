@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | WATERS-034 |
 | **Priority** | P1 |
-| **Status** | In Review |
+| **Status** | Done (v0.8.3) |
 | **Phase** | Quality |
 | **Assignee** | ann |
 | **Dependencies** | WATERS-028 |
