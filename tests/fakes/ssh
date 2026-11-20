@@ -10,6 +10,12 @@ if [[ " $* " == *" bash -s"* ]]; then
     cat >/dev/null
   fi
   [ "${FAKE_SSH_PROBE_FAIL:-0}" = 1 ] && { echo "Permission denied (publickey) token=hf_ABCDEFGH12345678" >&2; exit 255; }
+  if [ -n "${FAKE_SSH_SEQ:-}" ]; then
+    # FAKE_SSH_SEQ="a:b" answers the 1st call with a, then b (counter file FAKE_SSH_COUNTER)
+    c="$(cat "$FAKE_SSH_COUNTER" 2>/dev/null || echo 0)"; echo $((c + 1)) > "$FAKE_SSH_COUNTER"
+    IFS=: read -ra seq <<<"$FAKE_SSH_SEQ"; idx=$(( c < ${#seq[@]} ? c : ${#seq[@]} - 1 ))
+    cat "${seq[$idx]}"; exit 0
+  fi
   cat "${FAKE_SSH_PROBE_FILE:?FAKE_SSH_PROBE_FILE not set}"
   exit 0
 fi

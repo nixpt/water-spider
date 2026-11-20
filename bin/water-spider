@@ -1096,7 +1096,9 @@ ws_ssh_args() {
   WS_SSH=(-T -p "$V_PORT" -i "$SSH_KEY" -o IdentitiesOnly=yes
     -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3
     -o StrictHostKeyChecking=accept-new
-    -o "ControlMaster=${1:-auto}" -o "ControlPath=$cm/%C" -o ControlPersist=60 "root@$V_HOST")
+    "root@$V_HOST")
+  if [ "${1:-auto}" = none ]; then WS_SSH=("${WS_SSH[@]:0:${#WS_SSH[@]}-1}" -o ControlMaster=no -o ControlPath=none "root@$V_HOST")
+  else WS_SSH=("${WS_SSH[@]:0:${#WS_SSH[@]}-1}" -o ControlMaster=auto -o "ControlPath=$cm/%C" -o ControlPersist=60 "root@$V_HOST"); fi
 }
 
 # One ssh round trip -> $1 (a local file). Never leaves a pipe for the
@@ -1266,7 +1268,7 @@ ws_spend_update() {
   if ! [[ "$bal" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WS_SPEND_JSON="null"; WS_SPEND_LINE=""; return 0; fi
   [ -n "$WS_T0" ] || WS_T0="$bal"
   WS_SPEND_JSON="$(jq -cn --argjson b "$bal" --argjson t "$WS_T0" '{balance_usd:$b, t0_balance_usd:$t, spent_usd:((($t-$b)*100|round)/100)}')"
-  WS_SPEND_LINE="$(awk -v a="$WS_T0" -v b="$bal" 'BEGIN{printf "spend: $%.2f since T0 (balance $%.2f, T0 $%.2f)", a-b, b, a}')"
+  WS_SPEND_LINE="$(awk -v a="$WS_T0" -v b="$bal" 'BEGIN{printf "spend: $%.2f since T0 (account balance delta; balance $%.2f, T0 $%.2f)", a-b, b, a}')"
 }
 
 # net rx/tx (non-lo) and cgroup cpu usage, with rates from the previous tick.
@@ -1275,15 +1277,15 @@ ws_vis_topextra() {
   local t="$1" ts rx tx cu rate=""
   ts="$(sed -n 's/^ts=//p' "$t/meta" | head -1)"
   read -r rx tx < <(awk -F'[: ]+' '/:/ && $2!="lo"{r+=$3; x+=$11} END{printf "%d %d\n", r, x}' "$t/net")
-  if [[ "$ts" =~ ^[0-9]+$ ]] && [ -n "$WS_PREV_TS" ] && [ "$ts" -gt "$WS_PREV_TS" ]; then
+  if [[ "$ts" =~ ^[0-9]+$ ]] && [[ "$WS_PREV_TS" =~ ^[0-9]+$ ]] && [ "$ts" -gt "$WS_PREV_TS" ] && [ "$rx" -ge "$WS_PREV_RX" ] && [ "$tx" -ge "$WS_PREV_TX" ]; then
     rate="$(awk -v dr="$((rx - WS_PREV_RX))" -v dx="$((tx - WS_PREV_TX))" -v dt="$((ts - WS_PREV_TS))" 'BEGIN{printf "  (rx %.2f MB/s, tx %.2f MB/s)", dr/dt/1e6, dx/dt/1e6}')"
   fi
   printf 'net (non-lo): rx %s  tx %s%s\n' "$(ws_hb "$rx")" "$(ws_hb "$tx")" "$rate"
   cu="$(sed -n 's/^cpu_usec=//p' "$t/cg" | head -1)"
-  if [[ "$cu" =~ ^[0-9]+$ ]] && [ -n "$WS_PREV_CPU" ] && [[ "$ts" =~ ^[0-9]+$ ]] && [ "$ts" -gt "$WS_PREV_TS" ]; then
+  if [[ "$cu" =~ ^[0-9]+$ ]] && [[ "$WS_PREV_CPU" =~ ^[0-9]+$ ]] && [[ "$ts" =~ ^[0-9]+$ ]] && [[ "$WS_PREV_TS" =~ ^[0-9]+$ ]] && [ "$ts" -gt "$WS_PREV_TS" ] && [ "$cu" -ge "$WS_PREV_CPU" ]; then
     awk -v d="$((cu - WS_PREV_CPU))" -v dt="$((ts - WS_PREV_TS))" 'BEGIN{printf "cpu used: %.2f vCPU (cgroup usage delta)\n", d/dt/1e6}'
   else
-    echo "cpu used: needs two samples (next refresh)"
+    if [ -z "$cu" ]; then echo "cpu used: unavailable (no cgroup v2 cpu.stat)"; else echo "cpu used: needs two samples (next refresh)"; fi
   fi
   WS_PREV_TS="$ts"; WS_PREV_RX="$rx"; WS_PREV_TX="$tx"; WS_PREV_CPU="$cu"
   [ -z "$WS_SPEND_LINE" ] || echo "$WS_SPEND_LINE"
@@ -1313,7 +1315,7 @@ ws_vis_json() {
          | {user, pid:(.pid|n), ppid:(.ppid|n), elapsed_s:(.et|n), cpu_pct:(.cpu|n), rss_kib:(.rss|n), cmd, vram_mib:($vm[.pid])} ],
        mem: ($cg | lines | map(select(contains("=")) | split("=") | {key:.[0], value:(.[1:]|join("="))}) | from_entries
              | {cgroup:.v, current_bytes:(.mem_current|n), max_bytes:(.mem_max|n), cpu_max:.cpu_max, cpu_usec:(.cpu_usec|n)}),
-       disk: [ $disk | lines | .[1:][] | split(" ") | select(.[5] == "/" or .[5] == "/workspace")
+       disk: [ $disk | lines | .[1:][] | [splits(" +")] | select(.[5] == "/" or .[5] == "/workspace")
          | {mount:.[5], size_kib:(.[1]|n), used_kib:(.[2]|n), avail_kib:(.[3]|n), used_pct:(.[4]|rtrimstr("%")|n)} ],
        net: ([ $net | lines | .[] | select(contains(":")) | gsub(":"; " ") | split(" ") | map(select(length>0)) | select(.[0] != "lo") | {rx:(.[1]|n), tx:(.[9]|n)} ] | {rx_bytes:(map(.rx)|add), tx_bytes:(map(.tx)|add)}),
        listeners: [ $ls | lines | .[] | split("\t") | {exposure:.[0], addr:.[1], port:(.[2]|n), process:.[3]} ],
@@ -1350,8 +1352,11 @@ cmd_pod_view() {
   fi
   [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]"
   ws_vis_resolve
-  if [ -n "$out" ]; then ( umask 077; : >>"$out" ) || die "cannot write --out $out"; fi
-  WS_TMP="$(mktemp -d)"; WS_TMP="$(mktemp -d)"; trap 'rm -rf "$WS_TMP"' EXIT
+  if [ -n "$out" ]; then
+    { [ ! -e "$out" ] || { [ -f "$out" ] && [ ! -L "$out" ]; }; } || die "--out must be a new or regular (non-symlink) file: $out"
+    { ( umask 077; : >>"$out" ) && chmod 600 "$out"; } || die "cannot write --out $out"
+  fi
+  WS_TMP="$(mktemp -d)"; trap 'rm -rf "$WS_TMP"' EXIT
   local tick=0 fails=0 max="${WATER_SPIDER_WATCH_MAX_TICKS:-0}"
   while :; do
     tick=$((tick+1))
@@ -1369,6 +1374,10 @@ cmd_pod_view() {
       fi
     else
       fails=$((fails+1))
+      if [ "$mode" = watch ]; then
+        local eline; eline="$(jq -cn --arg label "${V_ID:-$V_HOST:$V_PORT}" --argjson ts "$(date +%s)" '{ts:$ts,label:$label,error:"probe failed"}')"
+        printf '%s\n' "$eline"; [ -z "$out" ] || printf '%s\n' "$eline" >>"$out"
+      fi
       [ -n "$watch" ] || exit 1
       [ "$fails" -lt 5 ] || die "5 consecutive probe failures, giving up"
     fi
@@ -1391,8 +1400,19 @@ ws_logs_script() {
   if [ "$follow" = 1 ]; then printf 'fl=1\n'; else printf 'fl=0\n'; fi
   cat <<'REMOTE'
 main() {
-  if [ ! -f "$f" ] || [ ! -r "$f" ]; then echo "water-spider: $f is not a readable regular file on the pod" >&2; return 2; fi
-  if [ "$fl" = 1 ]; then tail -n "$n" -F -- "$f" 2>&1 | red; else tail -n "$n" -- "$f" 2>&1 | red; fi
+  shopt -s nocasematch
+  r="$(readlink -f -- "$f" 2>/dev/null)" || r=""
+  case "$r" in
+    /workspace/*|/var/log/*|/tmp/*) ;;
+    *) echo "water-spider: $f resolves to '$r', outside /workspace, /var/log, /tmp: refused" >&2; return 2 ;;
+  esac
+  case "$r" in
+    */.git/*|*/.ssh/*|*/.config/*|*/.cache/huggingface/*|*/.aws/*|*/.docker/*|*/.runpod/*|*.pem|*.key|*_key|*_key.*|*id_rsa*|*id_ed25519*|*token*|*secret*|*credential*|*.env|*/.env*|*/.netrc|*/.npmrc)
+      echo "water-spider: $r can hold credentials: refused" >&2; return 2 ;;
+  esac
+  if [ ! -f "$r" ] || [ ! -r "$r" ]; then echo "water-spider: $r is not a readable regular file on the pod" >&2; return 2; fi
+  # --pid: tail exits when the ssh session (our parent) is gone, so no tail is left behind after Ctrl-C
+  if [ "$fl" = 1 ]; then tail -n "$n" -F --pid="$PPID" -- "$r" 2>&1 | red; else tail -n "$n" -- "$r" 2>&1 | red; fi
 }
 main </dev/null; exit
 REMOTE
@@ -1424,10 +1444,15 @@ cmd_logs() {
   fi
   [[ "$path" =~ ^/[A-Za-z0-9._/@+-]+$ ]] || die "logs: path must be absolute and plain ([A-Za-z0-9._/@+-])"
   case "$path" in
-    *..*|/proc/*|/sys/*|/etc/shadow*|*/.ssh/*|*/id_*|*.pem|*.key|*.env|*/.env*|*/.netrc|*/.git-credentials|*/.runpod/*|*/.config/*|*/.aws/*|*/.docker/*) die "logs: refusing a path that can hold credentials: $path" ;;
+    *//*|*/./*|*/.|*..*) die "logs: refusing a non-canonical path (//, /./, ..): $path" ;;
+    /workspace/*|/var/log/*|/tmp/*) ;;
+    *) die "logs: only /workspace, /var/log and /tmp are readable (refusing a path outside them): $path" ;;
+  esac
+  case "$path" in
+    */.git/*|*/.ssh/*|*/.config/*|*.pem|*.key|*_key|*id_*|*.env|*/.env*|*/.netrc|*/.npmrc|*token*|*secret*|*credential*) die "logs: refusing a path that can hold credentials: $path" ;;
   esac
   if [ -n "$V_PROBE" ]; then ws_redact <"$V_PROBE"; return 0; fi   # offline: render a captured log
-  ws_ssh_args "$([ "$follow" = 1 ] && echo no || echo auto)" || exit 1
+  ws_ssh_args "$([ "$follow" = 1 ] && echo none || echo auto)" || exit 1
   ws_logs_script "$path" "$lines" "$follow" | ssh "${WS_SSH[@]}" 'bash -s' 2>&1 | ws_redact_stream
 }
 

@@ -225,14 +225,39 @@ run_case "logs script targets the path" 0 "/workspace/results/run.log" cat "$SSH
 env FAKE_SSH_LOG="$SSHLOG2" FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --sync >/dev/null 2>&1
 run_case "logs --sync reads /workspace/sync.txt" 0 "/workspace/sync.txt" cat "$SSHLOG2"
 env FAKE_SSH_LOG="$SSHLOG2" FAKE_SSH_PROBE_FILE="$FX/log-sample.txt" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --sync --follow >/dev/null 2>&1
-run_case "logs --follow is one tail -F ssh with no master spawn" 0 "ControlMaster=no" cat "$SSHLOG2"
+run_case "logs --follow uses a dedicated connection (ControlPath=none)" 0 "ControlPath=none" cat "$SSHLOG2"
+run_case "logs --follow tail exits with the ssh session (--pid)" 0 "--pid=" cat "$SSHLOG2"
+run_case "logs script resolves symlinks and re-checks the allowlist" 0 'readlink -f' cat "$SSHLOG2"
 run_case "logs --follow script uses tail -F" 0 "tail -n" cat "$SSHLOG2"
-run_case "logs refuses credential paths" 1 "refusing a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /root/.ssh/id_ed25519
-run_case "logs refuses proc environ" 1 "refusing a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /proc/1/environ
-run_case "logs refuses traversal" 1 "refusing a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/../etc/passwd
+run_case "logs refuses credential paths" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/.ssh/id_ed25519
+run_case "logs refuses proc environ" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /proc/1/environ
+run_case "logs refuses //proc" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 //proc/1/environ
+run_case "logs refuses /./ forms" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/./x.log
+run_case "logs refuses /etc/shadow (outside allowlist)" 1 "outside" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /etc/shadow
+run_case "logs refuses ssh host keys" 1 "outside" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /etc/ssh/ssh_host_ed25519_key
+run_case "logs refuses .git/config" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/repo/.git/config
+run_case "logs refuses token files" 1 "refusing" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/hf_token.txt
+run_case "logs refuses traversal" 1 "non-canonical" "$CLI" logs --host 10.0.0.1 --pod-port 2222 /workspace/../etc/passwd
 run_case "logs refuses odd characters" 1 "plain" "$CLI" logs --host 10.0.0.1 --pod-port 2222 '/workspace/a;b'
 run_case "logs --follow needs a path" 1 "needs a path" "$CLI" logs --host 10.0.0.1 --pod-port 2222 --follow
 LS="$("$CLI" _logs-script /workspace/x.log 50 1)"
+# padded df (real `df -P`) must still yield / and /workspace in the JSON
+PADDED="$TEST_TMP/probe-padded.txt"
+awk '/^@@WS:disk@@/{print; print "Filesystem     1024-blocks      Used Available Capacity Mounted on"; print "overlay           31457280    920000  30537280       3% /"; print "mfs             1048576000 104857600 943718400      10% /workspace"; skip=1; next} /^@@WS:/{skip=0} !skip' "$FX/probe-clean.txt" > "$PADDED"
+run_case "watch JSON disk parses padded df" 0 '["/","/workspace"]' jq -c '[.disk[].mount]' <<<"$(env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FILE="$PADDED" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json)"
+# --out: pre-existing wide file is tightened; symlink refused
+echo old > "$TEST_TMP/wide.jsonl"; chmod 644 "$TEST_TMP/wide.jsonl"
+env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json --out "$TEST_TMP/wide.jsonl" >/dev/null
+if [ "$(stat -c %a "$TEST_TMP/wide.jsonl")" = 600 ]; then pass "watch --out tightens an existing file to 0600"; else fail "watch --out tightens an existing file to 0600" "$(stat -c %a "$TEST_TMP/wide.jsonl")"; fi
+ln -sf "$TEST_TMP/wide.jsonl" "$TEST_TMP/link.jsonl"
+run_case "watch --out refuses a symlink" 1 "non-symlink" env FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json --out "$TEST_TMP/link.jsonl"
+run_case "watch failed tick emits an error line" 0 '"error":"probe failed"' env WATER_SPIDER_WATCH_MAX_TICKS=1 FAKE_SSH_PROBE_FAIL=1 FAKE_SSH_PROBE_FILE="$FX/probe-clean.txt" "$CLI" watch --host 10.0.0.1 --pod-port 2222 --json
+# rate math: two ticks with different timestamps/counters
+SEQ1="$TEST_TMP/seq1.txt"; SEQ2="$TEST_TMP/seq2.txt"
+sed 's/^ts=.*/ts=1000/' "$FX/probe-clean.txt" > "$SEQ1"
+sed 's/^ts=.*/ts=1010/; s/^cpu_usec=.*/cpu_usec=25000000/; s/3000000000 100/3100000000 100/' "$FX/probe-clean.txt" > "$SEQ2"
+run_case "top computes rx rate and cpu use across ticks" 0 "rx 10.00 MB/s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
+run_case "top cpu used across ticks" 0 "cpu used: 2.00 vCPU" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_COUNTER="$TEST_TMP/ctr2" FAKE_SSH_SEQ="$SEQ1:$SEQ2" "$CLI" top --host 10.0.0.1 --pod-port 2222 --interval 5
 if printf '%s' "$LS" | grep -Eq '(^|[^A-Za-z_-])(kill|rm|mv|cp|tee|mkdir|touch|chmod|curl|wget|dd)[[:space:]]|environ|<<'; then fail "logs script is read-only" "$LS"; else pass "logs script is read-only"; fi
 
 # opt-in: real remote script inside a locked-down local container
