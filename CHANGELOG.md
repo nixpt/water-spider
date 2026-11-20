@@ -7,6 +7,17 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-20
+
+- Merge pull request #12 from nixpt/agent/ann/WATERS-025-a6000-recipe
+- docs: A6000 recipe, quantizing section (WATERS-025)
+- docs: A6000 recipe M2/M3 results, live-traffic stats, raw rows (WATERS-025)
+- docs: A6000 recipe M1/M2 results, MTP findings and pod gotchas (WATERS-025)
+- tunnel: add ServerAliveInterval/CountMax so a stalled forward dies instead of hanging (WATERS-025)
+- docs: A6000 llama-agent recipe draft (WATERS-025)
+
+
+
 ## [0.6.5] - 2026-11-19
 
 - Merge pull request #10 from nixpt/agent/ann/WATERS-024
