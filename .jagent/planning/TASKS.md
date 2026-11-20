@@ -22,6 +22,7 @@ full details on each `WATERS-N` ID.
 
 ## P1 — Release Readiness
 
+- [ ] [WATERS-038](tickets/WATERS-038-ghcr-v2-llama-ui-download.md) — release: GHCR v2 image fails on llama.cpp's UI download (P1)
 - [ ] [WATERS-035](tickets/WATERS-035-logs-deny-gaps.md) — logs: close the deny-list gaps from the #16 review (P2, ann)
 - [ ] [WATERS-036](tickets/WATERS-036-logs-fifo-open-hang.md) — logs: a FIFO swapped in after the check hangs the open (P2, ann)
 - [x] [WATERS-031](tickets/WATERS-031-logs-allowlist-test.md) — Test the pod-side logs allowlist by executing it
