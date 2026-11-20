@@ -67,6 +67,18 @@
 #                        # READ-ONLY pod visibility over ONE ssh round trip per
 #                        # refresh (ControlMaster reuse, secrets redacted, risk
 #                        # flags). Explicit --host/--pod-port needs no RunPod API.
+#   water-spider top <pod-id> [--host H --pod-port P] [--interval N] [--once]
+#                        [--limit N] [--t0-balance USD]
+#                        # one-screen dashboard: CPU, net rx/tx, spend, top procs (N >= 5)
+#   water-spider logs <pod-id> [<path>|--sync] [--follow] [--lines N]
+#                        [--host H --pod-port P]
+#                        # read-only tail of ONE file under /workspace, /var/log or
+#                        # /tmp (--sync = /workspace/sync.txt); credential-looking
+#                        # paths refused; --follow is one long ssh, no polling
+#   water-spider watch <pod-id> --json [--interval N] [--out FILE]
+#                        [--host H --pod-port P]
+#                        # one JSON line per tick (N >= 5). --json is REQUIRED:
+#                        # `watch` without it is an error (no text mode yet)
 #   water-spider scaffold <name> [foreman-scaffold flags...]
 #                        # OPTIONAL, fleet-internal only: thin passthrough to
 #                        # foreman-scaffold (needs a sibling jokersquad
@@ -962,6 +974,10 @@ cmd_scaffold() {
 # are appended.
 #
 # Redaction program (sed -E, GNU): applied remotely AND locally; idempotent.
+# Hex runs (WATERS-033): a run of EXACTLY 40 (git/SHA-1) or 64 (SHA-256) hex
+# characters passes through (commit ids are the useful part of sync.txt), unless a
+# secret-like word (token/key/secret/pass/credential/auth/cookie/jwt/pwd) appears
+# earlier on the same line. Any other run of 40+ hex stays masked. When unsure: mask.
 ws_redact_prog() {
   cat <<'RED'
 s|(://)[^/[:space:]]*@|\1<redacted>@|g
@@ -972,7 +988,12 @@ s/(^|[[:space:]])(-p)[[:space:]]+[^0-9[:space:]<][^[:space:]]*/\1\2 <redacted>/g
 s#(Bearer|Basic|Token)[[:space:]]+[^[:space:]<]+#\1 <redacted>#Ig
 s/([A-Za-z0-9_-]*(token|key|secret|pass|auth)[A-Za-z0-9_-]*:[[:space:]]*)[^[:space:]<:][^[:space:]]*/\1<redacted>/Ig
 s/(^|[^A-Za-z0-9])(hf_|sk-|rp_|ghp_|gho_|github_pat_|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}/\1<redacted>/g
-s/(^|[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\2/g
+:h
+s/((token|key|secret|pass|credential|auth|cookie|jwt|pwd).*[^A-Za-z0-9])[0-9a-fA-F]{40,}([^A-Za-z0-9]|$)/\1<redacted>\3/Ig
+th
+:b
+s/(^|[^A-Za-z0-9])([0-9a-fA-F]{41,63}|[0-9a-fA-F]{65,})([^A-Za-z0-9]|$)/\1<redacted>\3/g
+tb
 RED
 }
 ws_redact() { sed -E -e "$(ws_redact_prog)"; }
