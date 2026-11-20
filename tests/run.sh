@@ -110,7 +110,6 @@ run_case "invalid pod id rejected" 1 "invalid pod id" "$CLI" get 'x"y'
 # --- pod visibility (WATERS-027) ---
 export XDG_RUNTIME_DIR="$TEST_TMP/run"; mkdir -p "$XDG_RUNTIME_DIR"
 SSHLOG="$TEST_TMP/ssh.log"; : > "$SSHLOG"
-PS_OUT="$("$CLI" ps --host 10.0.0.1 --pod-port 2222 --limit 10 2>&1 >/dev/null || true)"
 run_case "ps explicit host needs no RunPod API" 0 "pod 10.0.0.1:2222" env FAKE_RUNPOD_MODE=api-fail FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
 run_case "ps shows user pid vram and redacted cmdline" 0 "python3 serve.py --token <redacted> HF_TOKEN=<redacted>" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
 PSOUT="$(env FAKE_SSH_LOG="$SSHLOG" FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222 2>&1)"
@@ -136,11 +135,11 @@ run_case "ps rejects option-injection host" 1 "invalid --host" env FAKE_SSH_PROB
 run_case "ps ssh failure is an error with redacted stderr" 1 "token=<redacted>" env FAKE_SSH_PROBE_FAIL=1 FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
 # the single ssh call: stdin script, ControlMaster, BatchMode, one round trip
 nssh="$(grep -c '^ARGV:' "$SSHLOG")"
-[ "$nssh" -eq 1 ] && pass "ps makes exactly one ssh call" || fail "ps makes exactly one ssh call" "got $nssh"
+if [ "$nssh" -eq 1 ]; then pass "ps makes exactly one ssh call"; else fail "ps makes exactly one ssh call" "got $nssh"; fi
 for opt in "bash -s" "BatchMode=yes" "ControlMaster=auto" "ControlPersist=60" "ConnectTimeout=" "ControlPath=$XDG_RUNTIME_DIR/water-spider-cm/"; do
-  grep -Fq -- "$opt" "$SSHLOG" && pass "ssh uses $opt" || fail "ssh uses $opt" "$(grep ARGV "$SSHLOG")"
+  if grep -Fq -- "$opt" "$SSHLOG"; then pass "ssh uses $opt"; else fail "ssh uses $opt" "$(grep ARGV "$SSHLOG")"; fi
 done
-[ "$(stat -c %a "$XDG_RUNTIME_DIR/water-spider-cm")" = 700 ] && pass "ControlMaster dir is 0700" || fail "ControlMaster dir is 0700" ""
+if [ "$(stat -c %a "$XDG_RUNTIME_DIR/water-spider-cm")" = 700 ]; then pass "ControlMaster dir is 0700"; else fail "ControlMaster dir is 0700" ""; fi
 # the remote script is read-only
 SCRIPT="$("$CLI" _probe-script)"
 BODY="$(printf '%s\n' "$SCRIPT" | sed '1d' | sed -E 's#2?>/dev/null##g; s#2>&1##g; s#</dev/null##g')"

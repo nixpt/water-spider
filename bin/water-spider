@@ -1048,7 +1048,7 @@ ws_cm_dir() {
   local d
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then d="$XDG_RUNTIME_DIR/water-spider-cm"
   else d="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/cm"; fi
-  mkdir -p "$d" && chmod 700 "$d" || die "cannot create ControlMaster dir $d"
+  { mkdir -p "$d" && chmod 700 "$d"; } || die "cannot create ControlMaster dir $d"
   [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ] || die "ControlMaster dir $d must be mode 0700 and owned by you"
   printf '%s' "$d"
 }
@@ -1128,7 +1128,7 @@ ws_vis_render() {
       local q p; q="$(kv "$t/cg" cpu_quota)"; p="$(kv "$t/cg" cpu_period)"
       [[ "$q" =~ ^[0-9]+$ ]] && [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -gt 0 ] && cpu="$(awk -v q="$q" -v p="$p" 'BEGIN{printf "%.1f vCPU", q/p}')"
     fi
-    local mem="$(ws_hb "$mc")"
+    local mem; mem="$(ws_hb "$mc")"
     if [[ "$mm" =~ ^[0-9]+$ ]] && [ "$mm" -lt 4611686018427387904 ]; then mem="$mem / $(ws_hb "$mm") ($(awk -v a="$mc" -v b="$mm" 'BEGIN{printf "%d", a*100/b}')%)"; else mem="$mem / unlimited"; fi
     printf 'container (cgroup v%s): mem %s   cpu limit %s   [cgroup, not host /proc/meminfo]\n' "$v" "$mem" "$cpu"
   else
@@ -1140,8 +1140,8 @@ ws_vis_render() {
   if [ "$gl" = ABSENT ]; then echo "gpu: nvidia-smi absent"
   elif [[ "$gl" == ERR* ]]; then echo "gpu: nvidia-smi failed: ${gl#ERR }"
   else
-    local i name uuid ut mu mt pw pl tp sm me
-    while IFS=, read -r i name uuid mu mt ut tp pw pl sm me; do
+    local i name ut mu mt pw pl tp sm me
+    while IFS=, read -r i name _ mu mt ut tp pw pl sm me; do
       i="${i// /}"; name="${name# }"
       printf 'GPU%s %s  util %s%%  VRAM %s/%s MiB  pwr %s/%s W  temp %sC  SM %s MHz  mem %s MHz\n' "$i" "$name" "${ut// /}" "${mu// /}" "${mt// /}" "${pw// /}" "${pl// /}" "${tp// /}" "${sm// /}" "${me// /}"
       if [[ "${mu// /}" =~ ^[0-9]+$ ]] && [[ "${mt// /}" =~ ^[0-9]+$ ]] && [ "${mt// /}" -gt 0 ] && [ $(( ${mu// /} * 100 )) -gt $(( ${mt// /} * 95 )) ]; then
