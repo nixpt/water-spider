@@ -74,10 +74,15 @@ path and again on the pod on the `readlink -f` resolved path, from one shared te
 file once (fd 3), re-checks that `/proc/self/fd/3` still resolves inside the allowlist and passes the
 deny list, and then `tail` reads fd 3 only (no re-open of the path, so a symlink swapped in after the
 check cannot redirect the read). `--follow` uses `tail -f --pid` on that fd: it follows the opened
-inode, so after a log rotation re-run `logs`; the tail exits with the ssh session. `watch --json` emits ps + gpu + mem + disk + net + listeners
+inode, so after a log rotation re-run `logs`; the tail exits with the ssh session. `watch` requires `--json` (no text mode yet; without it the command errors). `watch --json` emits ps + gpu + mem + disk + net + listeners
 + spend + flags per tick (stdout, and appended to `--out`, mode 0600) for guards and a future
 command-center panel. Redaction is best effort: attached short options (`-pSECRET`) and
-unquoted spaced values can leak, and any 40+ hex run (git SHAs, digests) is masked on purpose.
+unquoted spaced values can leak, and hex runs are handled by length (WATERS-033): a run of exactly 40 (git commit) or 64 (SHA-256 digest)
+hex characters is shown (`zorro=<sha>`, `commit <sha>`, `sha256:<digest>`), unless a secret-like word
+(token, key, secret, pass, credential, auth, cookie, jwt, pwd) appears earlier on the same line, as in
+`API_KEY=<hex>`, `--token <hex>` or `Bearer <hex>`; every other run of 40+ hex is masked. Residual risk: a
+bare 40/64-hex secret on a line with no secret-like word is no longer masked. When unsure the rule masks.
+The remote and local passes use the one `ws_redact_prog`.
 
 Tests: `tests/run.sh` (fakes) and `WS_TEST_DOCKER=1 tests/run.sh` (real remote
 script in a locked-down container). `tests/logs-exec.sh bash|docker` EXECUTES the pod-side `logs`
