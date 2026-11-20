@@ -107,5 +107,64 @@ run_case "fake curl rejects Bearer on argv (guard self-test)" 99 "Bearer token f
 run_case "GraphQL create passes key via stdin, not argv" 0 "created pod pod-new" "$CLI" create --image image --gpu gpu --country US
 run_case "invalid pod id rejected" 1 "invalid pod id" "$CLI" get 'x"y'
 
+# --- pod visibility (WATERS-027) ---
+export XDG_RUNTIME_DIR="$TEST_TMP/run"; mkdir -p "$XDG_RUNTIME_DIR"
+SSHLOG="$TEST_TMP/ssh.log"; : > "$SSHLOG"
+PS_OUT="$("$CLI" ps --host 10.0.0.1 --pod-port 2222 --limit 10 2>&1 >/dev/null || true)"
+run_case "ps explicit host needs no RunPod API" 0 "pod 10.0.0.1:2222" env FAKE_RUNPOD_MODE=api-fail FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+run_case "ps shows user pid vram and redacted cmdline" 0 "python3 serve.py --token <redacted> HF_TOKEN=<redacted>" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+PSOUT="$(env FAKE_SSH_LOG="$SSHLOG" FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222 2>&1)"
+for secret in abc123supersecret hf_AbCdEf0123456789 sk-live1234567890abcd; do
+  if printf '%s' "$PSOUT" | grep -Fq "$secret"; then fail "ps output hides $secret" "$PSOUT"; else pass "ps output hides $secret"; fi
+done
+run_case "ps flags public non-sshd listener" 0 "PUBLIC listener 0.0.0.0:8888 owned by jupyter" printf '%s' "$PSOUT"
+run_case "ps flags ipv6 public listener" 0 "PUBLIC listener [::]:9999" printf '%s' "$PSOUT"
+if printf '%s' "$PSOUT" | grep -q 'PUBLIC listener 0.0.0.0:22 '; then fail "ps does not flag sshd" "$PSOUT"; else pass "ps does not flag sshd"; fi
+run_case "ps shows loopback listener" 0 "LOOPBACK  127.0.0.1" printf '%s' "$PSOUT"
+run_case "ps flags unidentifiable GPU process" 0 "pid 777 (ghost" printf '%s' "$PSOUT"
+run_case "ps flags orphaned GPU process" 0 "pid 4242 (python3) is orphaned" printf '%s' "$PSOUT"
+run_case "ps flags disk > 90%" 0 "disk / is 95% full" printf '%s' "$PSOUT"
+run_case "ps flags VRAM > 95%" 0 "VRAM on GPU0 is 23900/24564 MiB" printf '%s' "$PSOUT"
+run_case "ps shows cgroup mem and cpu, not host" 0 "mem 20.0 GiB / 64.0 GiB (31%)   cpu limit 16.0 vCPU" printf '%s' "$PSOUT"
+run_case "ps clean pod has no flags" 0 "ok: no risk flags" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+run_case "gpu summary and per-process VRAM" 0 "4242     root       23800" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222
+run_case "gpu summary line" 0 "util 91%  VRAM 23900/24564 MiB  pwr 410.20/450.00 W  temp 71C  SM 2520 MHz  mem 10501 MHz" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-risky.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222
+run_case "gpu --watch below 5 refused" 1 "N >= 5" "$CLI" gpu --host 10.0.0.1 --pod-port 2222 --watch 4
+run_case "gpu --watch runs bounded ticks" 0 "refresh every 5s" env WATER_SPIDER_WATCH_MAX_TICKS=2 FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" gpu --host 10.0.0.1 --pod-port 2222 --watch 5
+run_case "ps resolves a bare pod id like connect" 0 "pod pod-1" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps pod-1
+run_case "ps rejects option-injection host" 1 "invalid --host" env FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host -oProxyCommand=x --pod-port 22
+run_case "ps ssh failure is an error with redacted stderr" 1 "token=<redacted>" env FAKE_SSH_PROBE_FAIL=1 FAKE_SSH_PROBE_FILE="$ROOT/tests/fixtures/probe-clean.txt" "$CLI" ps --host 10.0.0.1 --pod-port 2222
+# the single ssh call: stdin script, ControlMaster, BatchMode, one round trip
+nssh="$(grep -c '^ARGV:' "$SSHLOG")"
+[ "$nssh" -eq 1 ] && pass "ps makes exactly one ssh call" || fail "ps makes exactly one ssh call" "got $nssh"
+for opt in "bash -s" "BatchMode=yes" "ControlMaster=auto" "ControlPersist=60" "ConnectTimeout=" "ControlPath=$XDG_RUNTIME_DIR/water-spider-cm/"; do
+  grep -Fq -- "$opt" "$SSHLOG" && pass "ssh uses $opt" || fail "ssh uses $opt" "$(grep ARGV "$SSHLOG")"
+done
+[ "$(stat -c %a "$XDG_RUNTIME_DIR/water-spider-cm")" = 700 ] && pass "ControlMaster dir is 0700" || fail "ControlMaster dir is 0700" ""
+# the remote script is read-only
+SCRIPT="$("$CLI" _probe-script)"
+BODY="$(printf '%s\n' "$SCRIPT" | sed '1d' | sed -E 's#2?>/dev/null##g; s#2>&1##g; s#</dev/null##g')"
+RO_RE='(^|[^A-Za-z_-])(kill|pkill|rm|mv|cp|tee|mkdir|touch|chmod|apt|apt-get|pip|curl|wget|mktemp|dd)[[:space:]]|environ|<<|>[^ ]'
+if printf '%s' "$BODY" | grep -Eq "$RO_RE"; then fail "remote script is read-only" "$(printf '%s' "$BODY" | grep -En "$RO_RE" | head)"
+else pass "remote script is read-only (no kill/write/install/environ/heredoc)"; fi
+# degrade paths: run the REAL remote script with fakes; no nvidia-smi, no ss, no netstat
+FB="$TEST_TMP/fakebin"; mkdir -p "$FB"
+for t in bash cat awk sed date hostname id df printf head tr wc read; do p="$(command -v "$t" 2>/dev/null || true)"; [ -n "$p" ] && ln -sf "$p" "$FB/$t"; done
+cat > "$FB/ps" <<'PSF'
+#!/bin/sh
+echo "root 11 1 50 0.5 2048 python run.py --api-key=sk-ABCDEFGH12345678 password=hunter2 rp_ABCDEFGH1234"
+PSF
+chmod +x "$FB/ps"
+DEG="$(PATH="$FB" "$FB/bash" -c "$SCRIPT" 2>&1 </dev/null || true)"
+run_case "no nvidia-smi degrades" 0 "ABSENT" printf '%s' "$DEG"
+run_case "no ss/netstat degrades to /proc/net/tcp" 0 "mode=proc" printf '%s' "$DEG"
+run_case "remote side redacts before output leaves" 0 "--api-key=<redacted> password=<redacted> <redacted>" printf '%s' "$DEG"
+if printf '%s' "$DEG" | grep -Eq 'sk-ABCDEFGH|hunter2|rp_ABCDEFGH'; then fail "remote output has no secrets" "$DEG"; else pass "remote output has no secrets"; fi
+printf '%s' "$DEG" > "$TEST_TMP/deg.txt"
+run_case "ps renders degraded probe" 0 "gpu: nvidia-smi absent" "$CLI" ps --probe-file "$TEST_TMP/deg.txt"
+
+# opt-in: real remote script inside a locked-down local container
+if [ "${WS_TEST_DOCKER:-0}" = 1 ]; then run_case "docker rehearsal of the remote probe" 0 "no secret leaves the container" "$ROOT/tests/docker-rehearsal.sh"; fi
+
 printf '\n%d passed; %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

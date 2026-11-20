@@ -1,0 +1,32 @@
+@@WS:meta@@
+ts=1763620000
+host=pod-fixture
+user=root
+self=900
+@@WS:cgroup@@
+v=2
+mem_current=21474836480
+mem_max=68719476736
+cpu_max=1600000 100000
+@@WS:gpu@@
+0, NVIDIA GeForce RTX 4090, GPU-aaaa, 23900, 24564, 91, 71, 410.20, 450.00, 2520, 10501
+@@WS:gpuproc@@
+4242, 23800, python3
+777, 100, ghost
+@@WS:ps@@
+root 1 0 90000 0.0 4096 /bin/bash /start.sh
+root 4242 1 3600 88.5 5242880 python3 serve.py --token abc123supersecret HF_TOKEN=hf_AbCdEf0123456789 --port 8080
+runner 5000 1 120 1.0 2048 curl -H Authorization: Bearer sk-live1234567890abcd https://x
+root 5100 1 60 0.1 1024 sleep 99
+@@WS:listen@@
+mode=ss
+State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=10,fd=3))
+LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* users:(("python3",pid=4242,fd=5))
+LISTEN 0 128 0.0.0.0:8888 0.0.0.0:* users:(("jupyter",pid=50,fd=5))
+LISTEN 0 128 [::]:9999 [::]:* users:(("rp_agent",pid=51,fd=5))
+@@WS:disk@@
+Filesystem 1024-blocks Used Available Capacity Mounted on
+overlay 104857600 99614720 5242880 95% /
+mfs 1048576000 104857600 943718400 10% /workspace
+@@WS:end@@

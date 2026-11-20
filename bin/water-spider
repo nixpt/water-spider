@@ -62,6 +62,11 @@
 #   water-spider snapshot <pod-id> [-o FILE]   # save model list + image provenance
 #   water-spider teardown <pod-id> [--session-name NAME] [--pull PATH...]
 #   water-spider gpus [--available]        # `runpodctl gpu list`, filtered
+#   water-spider ps  <pod-id> [--host H --pod-port P] [--limit N]
+#   water-spider gpu <pod-id> [--host H --pod-port P] [--watch N]
+#                        # READ-ONLY pod visibility over ONE ssh round trip per
+#                        # refresh (ControlMaster reuse, secrets redacted, risk
+#                        # flags). Explicit --host/--pod-port needs no RunPod API.
 #   water-spider scaffold <name> [foreman-scaffold flags...]
 #                        # OPTIONAL, fleet-internal only: thin passthrough to
 #                        # foreman-scaffold (needs a sibling jokersquad
@@ -936,6 +941,336 @@ cmd_scaffold() {
   exec "$fs" "$@"
 }
 
+# ---- pod visibility: ps / gpu (WATERS-027) -------------------------------------
+# READ-ONLY views of what runs INSIDE a pod, with no hand-ssh. One ssh round
+# trip per refresh: a single remote script goes over stdin (`ssh ... 'bash -s'`)
+# and prints delimited sections (@@WS:name@@) that are rendered locally.
+#
+# Hard rules (tests/run.sh and tests/docker-rehearsal.sh enforce them):
+#   - the remote script only READS: no kill, no writes (not even /tmp), no
+#     installs, no heredocs or here-strings (bash may back them with temp
+#     files), no /proc/*/environ. A missing tool degrades ("nvidia-smi absent").
+#   - secrets are redacted on the remote side before output leaves the pod and
+#     again locally (ws_redact_prog is the single source of both).
+#   - like `tunnel`, an explicit --host/--pod-port needs NO RunPod API; with
+#     only a pod id the endpoint is resolved the way `connect` does.
+#   - ControlMaster reuse (private 0700 dir) so --watch is one connection.
+#
+# The nvidia-smi --query-gpu fields START with the MCP node profile's gpu_status
+# set (mcp/src/main.rs: index,name,uuid,memory.used,memory.total,utilization.gpu,
+# temperature.gpu,power.draw) so the two surfaces agree; power.limit and clocks
+# are appended.
+#
+# Redaction program (sed -E, GNU): applied remotely AND locally; idempotent.
+ws_redact_prog() {
+  cat <<'RED'
+s|(://[^/:@[:space:]]+):[^/@[:space:]]+@|\1:<redacted>@|g
+s/([A-Za-z0-9_.-]*(token|key|secret|passw(or)?d|credential|auth)[A-Za-z0-9_.-]*)=[^[:space:]]+/\1=<redacted>/Ig
+s/(^|[[:space:]])(--?[A-Za-z0-9_-]*(token|key|secret|passw(or)?d|auth)[A-Za-z0-9_-]*)[[:space:]]+[^-[:space:]][^[:space:]]*/\1\2 <redacted>/Ig
+s#(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+/=-]+#\1 <redacted>#Ig
+s/(authorization[:=]?[[:space:]]*)[^[:space:]<]+/\1<redacted>/Ig
+s/(^|[^A-Za-z0-9])(hf_|sk-|rp_|ghp_|gho_|github_pat_|xox[bp]-|AKIA)[A-Za-z0-9_-]{8,}/\1<redacted>/g
+RED
+}
+ws_redact() { sed -E -e "$(ws_redact_prog)"; }
+
+# The remote script. Emitted by `water-spider _probe-script` too (the docker
+# rehearsal pipes it into a container).
+ws_probe_script() {
+  printf 'red() { sed -E -e %q; }\n' "$(ws_redact_prog)"
+  cat <<'REMOTE'
+main() {
+  sec() { printf '@@WS:%s@@\n' "$1"; }
+  have() { command -v "$1" >/dev/null 2>&1; }
+  rd() { local v=""; [ -r "$1" ] && read -r v <"$1"; printf '%s' "$v"; }
+  sec meta
+  printf 'ts=%s\nhost=%s\nuser=%s\nself=%s\n' "$(date +%s 2>/dev/null)" "$(hostname 2>/dev/null)" "$(id -un 2>/dev/null)" "$$"
+  sec cgroup
+  if [ -r /sys/fs/cgroup/memory.current ]; then
+    printf 'v=2\nmem_current=%s\nmem_max=%s\ncpu_max=%s\n' "$(rd /sys/fs/cgroup/memory.current)" "$(rd /sys/fs/cgroup/memory.max)" "$(rd /sys/fs/cgroup/cpu.max)"
+  elif [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then
+    printf 'v=1\nmem_current=%s\nmem_max=%s\ncpu_quota=%s\ncpu_period=%s\n' "$(rd /sys/fs/cgroup/memory/memory.usage_in_bytes)" "$(rd /sys/fs/cgroup/memory/memory.limit_in_bytes)" "$(rd /sys/fs/cgroup/cpu/cpu.cfs_quota_us)" "$(rd /sys/fs/cgroup/cpu/cpu.cfs_period_us)"
+  else
+    printf 'v=none\n'
+  fi
+  sec gpu
+  if have nvidia-smi; then
+    o="$(nvidia-smi --query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,power.limit,clocks.sm,clocks.mem --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
+  else
+    echo ABSENT
+  fi
+  sec gpuproc
+  if have nvidia-smi; then
+    o="$(nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader,nounits 2>&1)" && printf '%s\n' "$o" || printf 'ERR %s\n' "$o"
+  else
+    echo ABSENT
+  fi
+  sec ps
+  if have ps; then
+    o="$(ps -eo user:24=,pid=,ppid=,etimes=,pcpu=,rss=,args= 2>/dev/null)" || o=""
+    printf '%s\n' "$o" | red | awk -v s="$$" '$2 != s && $3 != s && $0 !~ /ps -eo user:24=/'
+  else
+    echo ABSENT
+  fi
+  sec listen
+  l=""
+  if have ss && l="$(ss -ltnp 2>/dev/null)"; then
+    echo mode=ss; printf '%s\n' "$l" | red
+  elif have netstat && l="$(netstat -ltnp 2>/dev/null)"; then
+    echo mode=netstat; printf '%s\n' "$l" | red
+  else
+    echo mode=proc
+    h4() { printf '%d.%d.%d.%d' "0x${1:6:2}" "0x${1:4:2}" "0x${1:2:2}" "0x${1:0:2}"; }
+    for f in /proc/net/tcp /proc/net/tcp6; do
+      [ -r "$f" ] || continue
+      while read -r _ la _ st _; do
+        [ "$st" = 0A ] || continue
+        a="${la%%:*}"; p="$(printf '%d' "0x${la##*:}")"
+        if [ "${#a}" = 8 ]; then ad="$(h4 "$a")"
+        elif [ "${a//0/}" = "" ]; then ad="::"
+        elif [ "$a" = 00000000000000000000000001000000 ]; then ad="::1"
+        elif [ "${a:0:24}" = 0000000000000000FFFF0000 ]; then ad="::ffff:$(h4 "${a:24:8}")"
+        else ad="v6:$a"; fi
+        printf 'LISTEN 0 0 %s:%s 0.0.0.0:* -\n' "$ad" "$p"
+      done <"$f"
+    done
+  fi
+  sec disk
+  df -P -k / /workspace 2>/dev/null || true
+  sec end
+}
+main </dev/null; exit
+REMOTE
+}
+
+# Private 0700 ControlMaster socket dir.
+ws_cm_dir() {
+  local d
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then d="$XDG_RUNTIME_DIR/water-spider-cm"
+  else d="${XDG_CACHE_HOME:-$HOME/.cache}/water-spider/cm"; fi
+  mkdir -p "$d" && chmod 700 "$d" || die "cannot create ControlMaster dir $d"
+  [ "$(stat -c %a "$d")" = 700 ] && [ -O "$d" ] || die "ControlMaster dir $d must be mode 0700 and owned by you"
+  printf '%s' "$d"
+}
+
+# Common option parsing for ps/gpu. Sets V_ID V_HOST V_PORT V_PROBE and V_REST.
+ws_vis_parse() {
+  V_ID=""; V_HOST=""; V_PORT=""; V_PROBE=""; V_REST=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host) V_HOST="${2:?--host needs a value}"; shift 2 ;;
+      --pod-port) V_PORT="${2:?--pod-port needs a value}"; shift 2 ;;
+      --probe-file) V_PROBE="${2:?--probe-file needs a value}"; shift 2 ;;   # offline: render a captured probe
+      --*) V_REST+=("$1"); [ $# -ge 2 ] && [[ "$2" != --* ]] && { V_REST+=("$2"); shift; }; shift ;;
+      *) if [ -z "$V_ID" ]; then V_ID="$1"; shift; else die "unexpected arg '$1'"; fi ;;
+    esac
+  done
+}
+
+ws_vis_resolve() {
+  [ -n "$V_PROBE" ] && return 0
+  if [ -z "$V_HOST" ] || [ -z "$V_PORT" ]; then
+    [ -n "$V_ID" ] || die "need a <pod-id>, or both --host and --pod-port"
+    local info hp
+    info="$(rp_json ssh info "$V_ID")"
+    hp="$(ws_resolve_host_port "$info")"; V_HOST="${V_HOST:-${hp%%:*}}"; V_PORT="${V_PORT:-${hp##*:}}"
+  fi
+  [ -n "$V_HOST" ] && [ -n "$V_PORT" ] || die "could not resolve pod host/port (see: water-spider connect $V_ID) — pass --host/--pod-port explicitly"
+  [[ "$V_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid --host: $V_HOST"
+  [[ "$V_PORT" =~ ^[0-9]{1,5}$ ]] || die "invalid --pod-port: $V_PORT"
+}
+
+# One ssh round trip -> $1 (a local file). Never leaves a pipe for the
+# ControlPersist master to hold open.
+ws_vis_fetch() {
+  local out="$1" cm rc=0
+  if [ -n "$V_PROBE" ]; then
+    ws_redact <"$V_PROBE" >"$out"; return 0
+  fi
+  cm="$(ws_cm_dir)"
+  ws_probe_script | ssh -T -p "$V_PORT" -i "$SSH_KEY" -o IdentitiesOnly=yes \
+    -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+    -o StrictHostKeyChecking=accept-new \
+    -o ControlMaster=auto -o "ControlPath=$cm/%C" -o ControlPersist=60 \
+    "root@$V_HOST" 'bash -s' >"$out.raw" 2>"$out.err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$SCRIPT_NAME: ssh to $V_HOST:$V_PORT failed (rc=$rc): $(ws_redact <"$out.err" | tail -3 | tr '\n' ' ')" >&2
+    return 1
+  fi
+  ws_redact <"$out.raw" >"$out"          # second, local redaction pass
+  grep -q '^@@WS:end@@$' "$out" || { echo "$SCRIPT_NAME: probe output truncated (no end marker)" >&2; return 1; }
+}
+
+ws_hostport() { case "$1" in *:*) printf '[%s]:%s' "$1" "$2" ;; *) printf '%s:%s' "$1" "$2" ;; esac; }
+ws_sec() { awk -v n="@@WS:$2@@" '$0==n{f=1;next} /^@@WS:/{f=0} f' "$1"; }
+
+ws_hb() { awk -v b="${1:-0}" 'BEGIN{ if (b !~ /^[0-9]+$/) {print "?"; exit} u="B KiB MiB GiB TiB"; split(u,s," "); i=1; while (b>=1024 && i<5){b/=1024;i++} printf (i==1?"%d %s":"%.1f %s"), b, s[i] }'; }
+
+# Render one snapshot. $1 = probe file, $2 = ps|gpu, $3 = ps row limit.
+ws_vis_render() {
+  local f="$1" mode="$2" limit="${3:-40}" t="$WS_TMP"
+  local flags="$t/flags"; : >"$flags"
+  local label="${V_ID:-$V_HOST:$V_PORT}"
+  ws_sec "$f" meta >"$t/meta"; ws_sec "$f" cgroup >"$t/cg"; ws_sec "$f" gpu >"$t/gpu"
+  ws_sec "$f" gpuproc >"$t/gp"; ws_sec "$f" ps >"$t/ps"; ws_sec "$f" listen >"$t/ls"; ws_sec "$f" disk >"$t/disk"
+  kv() { sed -n "s/^$2=//p" "$1" | head -1; }
+  printf '== pod %s  host %s  at %s (UTC)\n' "$label" "$(kv "$t/meta" host)" "$(date -u +%H:%M:%S)"
+
+  # container limits (cgroup), never /proc/meminfo (that is the host)
+  local v mc mm cm_
+  v="$(kv "$t/cg" v)"; mc="$(kv "$t/cg" mem_current)"; mm="$(kv "$t/cg" mem_max)"
+  if [ "$v" = 2 ] || [ "$v" = 1 ]; then
+    local cpu="unlimited"
+    if [ "$v" = 2 ]; then
+      cm_="$(kv "$t/cg" cpu_max)"
+      [[ "$cm_" =~ ^([0-9]+)\ ([0-9]+)$ ]] && cpu="$(awk -v q="${BASH_REMATCH[1]}" -v p="${BASH_REMATCH[2]}" 'BEGIN{printf "%.1f vCPU", q/p}')"
+    else
+      local q p; q="$(kv "$t/cg" cpu_quota)"; p="$(kv "$t/cg" cpu_period)"
+      [[ "$q" =~ ^[0-9]+$ ]] && [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -gt 0 ] && cpu="$(awk -v q="$q" -v p="$p" 'BEGIN{printf "%.1f vCPU", q/p}')"
+    fi
+    local mem="$(ws_hb "$mc")"
+    if [[ "$mm" =~ ^[0-9]+$ ]] && [ "$mm" -lt 4611686018427387904 ]; then mem="$mem / $(ws_hb "$mm") ($(awk -v a="$mc" -v b="$mm" 'BEGIN{printf "%d", a*100/b}')%)"; else mem="$mem / unlimited"; fi
+    printf 'container (cgroup v%s): mem %s   cpu limit %s   [cgroup, not host /proc/meminfo]\n' "$v" "$mem" "$cpu"
+  else
+    printf 'container: cgroup limits unavailable (no cgroup v1/v2 files readable)\n'
+  fi
+
+  # GPU
+  local gl; gl="$(head -1 "$t/gpu")"
+  if [ "$gl" = ABSENT ]; then echo "gpu: nvidia-smi absent"
+  elif [[ "$gl" == ERR* ]]; then echo "gpu: nvidia-smi failed: ${gl#ERR }"
+  else
+    local i name uuid ut mu mt pw pl tp sm me
+    while IFS=, read -r i name uuid mu mt ut tp pw pl sm me; do
+      i="${i// /}"; name="${name# }"
+      printf 'GPU%s %s  util %s%%  VRAM %s/%s MiB  pwr %s/%s W  temp %sC  SM %s MHz  mem %s MHz\n' "$i" "$name" "${ut// /}" "${mu// /}" "${mt// /}" "${pw// /}" "${pl// /}" "${tp// /}" "${sm// /}" "${me// /}"
+      if [[ "${mu// /}" =~ ^[0-9]+$ ]] && [[ "${mt// /}" =~ ^[0-9]+$ ]] && [ "${mt// /}" -gt 0 ] && [ $(( ${mu// /} * 100 )) -gt $(( ${mt// /} * 95 )) ]; then
+        echo "VRAM on GPU$i is ${mu// /}/${mt// /} MiB (> 95%): next allocation may OOM" >>"$flags"
+      fi
+    done <"$t/gpu"
+  fi
+
+  # GPU processes: pid -> VRAM (join with ps)
+  : >"$t/vram"
+  local gp
+  gp="$(head -1 "$t/gp")"
+  if [ "$gp" != ABSENT ] && [[ "$gp" != ERR* ]]; then
+    local pid used pname
+    while IFS=, read -r pid used pname; do
+      pid="${pid// /}"; used="${used// /}"; pname="${pname# }"
+      [[ "$pid" =~ ^[0-9]+$ ]] || continue
+      printf '%s %s\n' "$pid" "${used:-?}" >>"$t/vram"
+      local row; row="$(awk -v p="$pid" '$2==p{print; exit}' "$t/ps")"
+      if [ -z "$row" ]; then
+        echo "GPU process pid $pid (${pname:-?}, ${used} MiB) is not visible in this container's process table: owner/parent unidentifiable (pid namespace?), SIGKILL-prone" >>"$flags"
+      else
+        local ppid; ppid="$(awk '{print $3}' <<<"$row")"
+        [ "$ppid" = 1 ] || [ "$ppid" = 0 ] && echo "GPU process pid $pid (${pname:-?}) is orphaned (parent pid $ppid, no shell/supervisor holds it): SIGKILL-prone" >>"$flags"
+      fi
+    done <"$t/gp"
+  fi
+
+  if [ "$mode" = gpu ]; then
+    echo "-- GPU processes (VRAM MiB)"
+    if [ "$gp" = ABSENT ]; then echo "   nvidia-smi absent"
+    elif [[ "$gp" == ERR* ]]; then echo "   nvidia-smi failed"
+    elif [ ! -s "$t/vram" ]; then echo "   none reported (a container may not see host-pid compute apps)"
+    else
+      printf '   %-8s %-10s %-10s %s\n' PID USER "VRAM(MiB)" CMD
+      while read -r pid used; do
+        awk -v p="$pid" -v u="$used" '$2==p{c=""; for(i=7;i<=NF;i++) c=c (i>7?" ":"") $i; if(length(c)>100) c=substr(c,1,97) "..."; printf "   %-8s %-10s %-10s %s\n", $2, $1, u, c; f=1} END{if(!f) printf "   %-8s %-10s %-10s %s\n", p, "?", u, "(not in container pid table)"}' "$t/ps"
+      done <"$t/vram"
+    fi
+  else
+    echo "-- processes: $(wc -l <"$t/ps" | tr -d ' ') total, top $limit by VRAM then CPU"
+    if [ "$(head -1 "$t/ps")" = ABSENT ]; then echo "   ps absent"
+    else
+      printf '   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n' USER PID PPID ELAPSED "%CPU" RSS "VRAM(MiB)" CMD
+      awk -v vf="$t/vram" -v w="${WS_WIDTH:-110}" '
+        function el(s,  d,h,m){ d=int(s/86400); h=int((s%86400)/3600); m=int((s%3600)/60);
+          if(d>0) return sprintf("%dd%02dh",d,h); if(h>0) return sprintf("%dh%02dm",h,m); if(m>0) return sprintf("%dm%02ds",m,s%60); return s "s" }
+        BEGIN{ while((getline l < vf)>0){split(l,a," "); v[a[1]]=a[2]} }
+        { c=""; for(i=7;i<=NF;i++) c=c (i>7?" ":"") $i; if(length(c)>w) c=substr(c,1,w-3) "...";
+          vr=($2 in v)?v[$2]:"-"; vk=($2 in v)?((v[$2]+0)+1):0;
+          printf "%d\t%s\t   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n", vk, $5, substr($1,1,10), $2, $3, el($4), $5, sprintf("%.0fM",$6/1024), vr, c }' "$t/ps" \
+        | sort -t "$(printf '\t')" -k1,1nr -k2,2nr | head -n "$limit" | cut -f3-
+    fi
+    echo "-- listening sockets"
+    local mode_ l; mode_="$(kv "$t/ls" mode)"
+    printf '   %-9s %-28s %-8s %s\n' EXPOSURE ADDRESS PORT PROCESS
+    while read -r l; do
+      local la="" pr="" st="" rest
+      case "$mode_" in
+        ss)      read -r st _ _ la _ pr <<<"$l"; [ "$st" = LISTEN ] || continue ;;
+        netstat) read -r _ _ _ la _ st pr <<<"$l"; [ "$st" = LISTEN ] || continue ;;
+        proc)    read -r st _ _ la _ pr <<<"$l"; [ "$st" = LISTEN ] || continue ;;
+        *) continue ;;
+      esac
+      local port="${la##*:}" addr="${la%:*}"; addr="${addr#[}"; addr="${addr%]}"; addr="${addr%%%*}"
+      local exp=PUBLIC
+      [[ "$addr" =~ ^127\. ]] || [ "$addr" = "::1" ] || [[ "$addr" =~ ^::ffff:127\. ]] && exp=LOOPBACK
+      [ -n "$pr" ] || pr="-"
+      local pname="$pr"
+      [[ "$pr" =~ \(\(\"([^\"]+)\" ]] && pname="${BASH_REMATCH[1]}"
+      [[ "$pr" =~ ^[0-9]+/(.+)$ ]] && pname="${BASH_REMATCH[1]}"
+      printf '   %-9s %-28s %-8s %s\n' "$exp" "${addr:-*}" "$port" "$pr"
+      if [ "$exp" = PUBLIC ] && [ "${pname#sshd}" = "$pname" ]; then
+        if [ "$pname" = "-" ]; then echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") (owner unknown: ${mode_} gave no process info), not shown to be sshd" >>"$flags"
+        else echo "PUBLIC listener $(ws_hostport "${addr:-*}" "$port") owned by $pname (not sshd)" >>"$flags"; fi
+      fi
+    done < <(grep -v '^mode=' "$t/ls")
+  fi
+
+  # disk
+  echo "-- disk"
+  awk 'NR>1 && ($6=="/" || $6=="/workspace"){printf "   %-12s %s used of %.1f GiB (%.1f GiB free)\n", $6, $5, $2/1048576, $4/1048576}' "$t/disk"
+  [ -s "$t/disk" ] || echo "   df unavailable"
+  awk 'NR>1 && ($6=="/" || $6=="/workspace"){c=$5; sub("%","",c); if (c+0>90) printf "disk %s is %s%% full (> 90%%)\n", $6, c}' "$t/disk" >>"$flags"
+
+  if [ -s "$flags" ]; then while read -r l; do printf '⚠️  %s\n' "$l"; done <"$flags"
+  else echo "ok: no risk flags (public listeners, orphaned GPU procs, disk > 90%, VRAM > 95%)"; fi
+}
+
+# Shared driver for `ps` and `gpu`.
+cmd_pod_view() {
+  local mode="$1"; shift
+  ws_vis_parse "$@"
+  local watch="" limit=40 i=0
+  while [ "$i" -lt "${#V_REST[@]}" ]; do
+    case "${V_REST[$i]}" in
+      --watch) [ "$mode" = gpu ] || die "ps: --watch is only for gpu"; watch="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --limit) [ "$mode" = ps ] || die "gpu: --limit is only for ps"; limit="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      *) die "$mode: unknown option '${V_REST[$i]}'" ;;
+    esac
+  done
+  [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ] || die "--limit must be a positive integer"
+  if [ -n "$watch" ]; then
+    [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] || die "--watch N needs an integer N >= 5 (seconds)"
+  fi
+  [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]$( [ "$mode" = gpu ] && printf ' [--watch N]')"
+  ws_vis_resolve
+  WS_TMP="$(mktemp -d)"; trap 'rm -rf "$WS_TMP"' EXIT
+  local tick=0 fails=0 max="${WATER_SPIDER_WATCH_MAX_TICKS:-0}"
+  while :; do
+    tick=$((tick+1))
+    if ws_vis_fetch "$WS_TMP/probe"; then
+      fails=0
+      [ -n "$watch" ] && [ -t 1 ] && printf '\033[H\033[2J'
+      ws_vis_render "$WS_TMP/probe" "$mode" "$limit"
+    else
+      fails=$((fails+1))
+      [ -n "$watch" ] || exit 1
+      [ "$fails" -lt 5 ] || die "5 consecutive probe failures, giving up"
+    fi
+    [ -n "$watch" ] || break
+    [ "$max" -eq 0 ] || [ "$tick" -lt "$max" ] || break
+    echo "(refresh every ${watch}s, Ctrl-C to stop)"
+    sleep "$watch"
+  done
+}
+cmd_ps()  { cmd_pod_view ps "$@"; }
+cmd_gpu() { cmd_pod_view gpu "$@"; }
+
 # ---- dispatch ---------------------------------------------------------------
 [ $# -ge 1 ] || { usage; exit 1; }
 sub="$1"; shift
@@ -954,6 +1289,9 @@ case "$sub" in
   teardown)  cmd_teardown "$@" ;;
   gpus)      cmd_gpus "$@" ;;
   scaffold)  cmd_scaffold "$@" ;;
+  ps)        cmd_ps "$@" ;;
+  gpu)       cmd_gpu "$@" ;;
+  _probe-script) ws_probe_script ;;   # internal: the read-only remote script (tests)
   -h|--help|help) usage ;;
   *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac

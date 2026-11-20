@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Probe mode (ps/gpu): the script arrives on stdin for `bash -s`. Never run it;
+# log argv + the script and answer with a fixture.
+if [[ " $* " == *" bash -s"* ]]; then
+  if [ -n "${FAKE_SSH_LOG:-}" ]; then
+    { printf 'ARGV: %s\n' "$*"; echo '--- stdin script ---'; cat; echo '--- end ---'; } >>"$FAKE_SSH_LOG"
+  else
+    cat >/dev/null
+  fi
+  [ "${FAKE_SSH_PROBE_FAIL:-0}" = 1 ] && { echo "Permission denied (publickey) token=hf_ABCDEFGH12345678" >&2; exit 255; }
+  cat "${FAKE_SSH_PROBE_FILE:?FAKE_SSH_PROBE_FILE not set}"
+  exit 0
+fi
+
 if [ "${FAKE_SSH_REQUIRE_AGENT:-0}" = "1" ] && [[ "$*" == *"llama-server"* ]]; then
   [[ "$*" == *"--host 127.0.0.1"* ]]
   [[ "$*" == *"--jinja --flash-attn auto --alias speedy"* ]]
