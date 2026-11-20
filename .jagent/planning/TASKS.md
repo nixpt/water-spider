@@ -38,6 +38,7 @@ full details on each `WATERS-N` ID.
 
 - [ ] [WATERS-032](tickets/WATERS-032-help-visibility-commands.md) — --help lists top, logs and watch
 - [ ] [WATERS-030](tickets/WATERS-030-logs-toctou.md) — logs: close the readlink-to-tail race
+- [ ] [WATERS-033](tickets/WATERS-033-redact-commit-ids.md) — redaction: stop masking git commit ids (P3)
 - [x] [WATERS-019](tickets/WATERS-019-v2-operator-guide.md) — Document v2 GPU, llama.cpp, GUI, storage, and MCP use
 - [x] [WATERS-015](tickets/WATERS-015-agent-skill.md) — Add a cost-safe water-spider skill for agents
 - [x] [WATERS-014](tickets/WATERS-014-user-guides.md) — Restructure the README and add user-facing guides
