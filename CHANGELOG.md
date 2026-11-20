@@ -7,6 +7,14 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-20
+
+- Merge pull request #17 from nixpt/agent/ann/WATERS-032-033-help-redaction
+- Merge origin/main (#16 logs hardening) into WATERS-032/033
+- WATERS-032/033: --help lists all commands; redaction keeps commit ids
+
+
+
 ## [0.8.1] - 2026-11-20
 
 - Merge pull request #16 from nixpt/agent/ann/WATERS-031-029-030-logs-hardening
