@@ -992,6 +992,7 @@ main() {
   sec cgroup
   if [ -r /sys/fs/cgroup/memory.current ]; then
     printf 'v=2\nmem_current=%s\nmem_max=%s\ncpu_max=%s\n' "$(rd /sys/fs/cgroup/memory.current)" "$(rd /sys/fs/cgroup/memory.max)" "$(rd /sys/fs/cgroup/cpu.max)"
+    [ -r /sys/fs/cgroup/cpu.stat ] && while read -r k v; do [ "$k" = usage_usec ] && printf 'cpu_usec=%s\n' "$v"; done </sys/fs/cgroup/cpu.stat
   elif [ -r /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then
     printf 'v=1\nmem_current=%s\nmem_max=%s\ncpu_quota=%s\ncpu_period=%s\n' "$(rd /sys/fs/cgroup/memory/memory.usage_in_bytes)" "$(rd /sys/fs/cgroup/memory/memory.limit_in_bytes)" "$(rd /sys/fs/cgroup/cpu/cpu.cfs_quota_us)" "$(rd /sys/fs/cgroup/cpu/cpu.cfs_period_us)"
   else
@@ -1039,6 +1040,8 @@ main() {
       done <"$f"
     done
   fi
+  sec net
+  [ -r /proc/net/dev ] && while read -r l; do printf '%s\n' "$l"; done </proc/net/dev
   sec disk
   to df -P -k / /workspace 2>/dev/null || true
   sec end
@@ -1065,6 +1068,7 @@ ws_vis_parse() {
       --host) V_HOST="${2:?--host needs a value}"; shift 2 ;;
       --pod-port) V_PORT="${2:?--pod-port needs a value}"; shift 2 ;;
       --probe-file) V_PROBE="${2:?--probe-file needs a value}"; shift 2 ;;   # offline: render a captured probe
+      --json|--once|--follow|--sync) V_REST+=("$1"); shift ;;
       --*) V_REST+=("$1"); [ $# -ge 2 ] && [[ "$2" != --* ]] && { V_REST+=("$2"); shift; }; shift ;;
       *) if [ -z "$V_ID" ]; then V_ID="$1"; shift; else die "unexpected arg '$1'"; fi ;;
     esac
@@ -1117,7 +1121,7 @@ ws_vis_render() {
   local flags="$t/flags"; : >"$flags"
   local label="${V_ID:-$V_HOST:$V_PORT}"
   ws_sec "$f" meta >"$t/meta"; ws_sec "$f" cgroup >"$t/cg"; ws_sec "$f" gpu >"$t/gpu"
-  ws_sec "$f" gpuproc >"$t/gp"; ws_sec "$f" ps >"$t/ps"; ws_sec "$f" listen >"$t/ls"; ws_sec "$f" disk >"$t/disk"
+  ws_sec "$f" gpuproc >"$t/gp"; ws_sec "$f" net >"$t/net"; ws_sec "$f" ps >"$t/ps"; ws_sec "$f" listen >"$t/ls"; ws_sec "$f" disk >"$t/disk"
   kv() { sed -n "s/^$2=//p" "$1" | head -1; }
   printf '== pod %s  host %s  at %s (UTC)\n' "$label" "$(kv "$t/meta" host)" "$(date -u +%H:%M:%S)"
 
@@ -1156,7 +1160,7 @@ ws_vis_render() {
   fi
 
   # GPU processes: pid -> VRAM (join with ps)
-  : >"$t/vram"
+  : >"$t/vram"; : >"$t/listeners.tsv"
   local gp
   gp="$(head -1 "$t/gp")"
   if [ "$gp" != ABSENT ] && [[ "$gp" != ERR* ]]; then
@@ -1175,6 +1179,7 @@ ws_vis_render() {
     done <"$t/gp"
   fi
 
+  [ "$mode" != top ] || ws_vis_topextra "$t"
   if [ "$mode" = gpu ]; then
     echo "-- GPU processes (VRAM MiB)"
     if [ "$gp" = ABSENT ]; then echo "   nvidia-smi absent"
@@ -1187,16 +1192,16 @@ ws_vis_render() {
       done <"$t/vram"
     fi
   else
-    echo "-- processes: $(wc -l <"$t/ps" | tr -d ' ') total, top $limit by VRAM then CPU"
+    echo "-- processes: $(wc -l <"$t/ps" | tr -d ' ') total, top $limit by $([ "$mode" = top ] && echo CPU || echo "VRAM then CPU")"
     if [ "$(head -1 "$t/ps")" = ABSENT ]; then echo "   ps absent"
     else
       printf '   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n' USER PID PPID ELAPSED "%CPU" RSS "VRAM(MiB)" CMD
-      awk -v vf="$t/vram" -v w="${WS_WIDTH:-110}" '
+      awk -v vf="$t/vram" -v w="${WS_WIDTH:-110}" -v cpuonly="$([ "$mode" = top ] && echo 1 || echo 0)" '
         function el(s,  d,h,m){ d=int(s/86400); h=int((s%86400)/3600); m=int((s%3600)/60);
           if(d>0) return sprintf("%dd%02dh",d,h); if(h>0) return sprintf("%dh%02dm",h,m); if(m>0) return sprintf("%dm%02ds",m,s%60); return s "s" }
         BEGIN{ while((getline l < vf)>0){split(l,a," "); v[a[1]]=a[2]} }
         { c=""; for(i=7;i<=NF;i++) c=c (i>7?" ":"") $i; if(length(c)>w) c=substr(c,1,w-3) "...";
-          vr=($2 in v)?v[$2]:"-"; vk=($2 in v)?((v[$2]+0)+1):0;
+          vr=($2 in v)?v[$2]:"-"; vk=(($2 in v) && !cpuonly)?((v[$2]+0)+1):0;
           printf "%d\t%s\t   %-10s %-7s %-7s %-9s %5s %9s %9s  %s\n", vk, $5, substr($1,1,10), $2, $3, el($4), $5, sprintf("%.0fM",$6/1024), vr, c }' "$t/ps" \
         | sort -t "$(printf '\t')" -k1,1nr -k2,2nr | head -n "$limit" | cut -f3- || true   # head may close early: SIGPIPE must not abort under pipefail
     fi
@@ -1222,6 +1227,7 @@ ws_vis_render() {
       local pname="$pr"
       [[ "$pr" =~ \(\(\"([^\"]+)\" ]] && pname="${BASH_REMATCH[1]}"
       [[ "$pr" =~ ^[0-9]+/(.+)$ ]] && pname="${BASH_REMATCH[1]}"
+      printf '%s\t%s\t%s\t%s\n' "$exp" "${addr:-*}" "$port" "$pr" >>"$t/listeners.tsv"
       [ "$mode" != ps ] || printf '   %-9s %-28s %-8s %s\n' "$exp" "${addr:-*}" "$port" "$pr"
       if [ "$exp" = PUBLIC ] && [ "${pname#sshd}" = "$pname" ]; then
         if [ "$pname" = "-" ] && [ "$mode_" = proc ] && [ "$port" = 22 ]; then :
@@ -1240,32 +1246,120 @@ ws_vis_render() {
   else echo "ok: no risk flags (public listeners, orphaned GPU procs, disk > 90%, VRAM > 95%)"; fi
 }
 
-# Shared driver for `ps` and `gpu`.
+
+# --- WATERS-028 helpers ----------------------------------------------------
+# Spend since T0 from the RunPod balance (optional: omitted without the API).
+# T0 = --t0-balance, else the first balance this process saw. Cached 60 s.
+WS_SPEND_JSON="null"; WS_SPEND_LINE=""; WS_T0=""; WS_SPEND_AT=0
+ws_spend_update() {
+  local now bal
+  now="$(date +%s)"
+  [ $((now - WS_SPEND_AT)) -ge 60 ] || return 0
+  WS_SPEND_AT="$now"
+  bal="$(timeout 10 runpodctl user -o json 2>/dev/null | jq -r '.clientBalance // empty' 2>/dev/null || true)"
+  if ! [[ "$bal" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then WS_SPEND_JSON="null"; WS_SPEND_LINE=""; return 0; fi
+  [ -n "$WS_T0" ] || WS_T0="$bal"
+  WS_SPEND_JSON="$(jq -cn --argjson b "$bal" --argjson t "$WS_T0" '{balance_usd:$b, t0_balance_usd:$t, spent_usd:((($t-$b)*100|round)/100)}')"
+  WS_SPEND_LINE="spend: \$$(awk -v a="$WS_T0" -v b="$bal" 'BEGIN{printf "%.2f", a-b}') since T0 (balance \$$bal, T0 \$$WS_T0)"
+}
+
+# net rx/tx (non-lo) and cgroup cpu usage, with rates from the previous tick.
+WS_PREV_TS=""; WS_PREV_RX=0; WS_PREV_TX=0; WS_PREV_CPU=""
+ws_vis_topextra() {
+  local t="$1" ts rx tx cu rate=""
+  ts="$(sed -n 's/^ts=//p' "$t/meta" | head -1)"
+  read -r rx tx < <(awk -F'[: ]+' '/:/ && $2!="lo"{r+=$3; x+=$11} END{printf "%d %d\n", r, x}' "$t/net")
+  if [[ "$ts" =~ ^[0-9]+$ ]] && [ -n "$WS_PREV_TS" ] && [ "$ts" -gt "$WS_PREV_TS" ]; then
+    rate="$(awk -v dr="$((rx - WS_PREV_RX))" -v dx="$((tx - WS_PREV_TX))" -v dt="$((ts - WS_PREV_TS))" 'BEGIN{printf "  (rx %.2f MB/s, tx %.2f MB/s)", dr/dt/1e6, dx/dt/1e6}')"
+  fi
+  printf 'net (non-lo): rx %s  tx %s%s\n' "$(ws_hb "$rx")" "$(ws_hb "$tx")" "$rate"
+  cu="$(sed -n 's/^cpu_usec=//p' "$t/cg" | head -1)"
+  if [[ "$cu" =~ ^[0-9]+$ ]] && [ -n "$WS_PREV_CPU" ] && [[ "$ts" =~ ^[0-9]+$ ]] && [ "$ts" -gt "$WS_PREV_TS" ]; then
+    awk -v d="$((cu - WS_PREV_CPU))" -v dt="$((ts - WS_PREV_TS))" 'BEGIN{printf "cpu used: %.2f vCPU (cgroup usage delta)\n", d/dt/1e6}'
+  else
+    echo "cpu used: needs two samples (next refresh)"
+  fi
+  WS_PREV_TS="$ts"; WS_PREV_RX="$rx"; WS_PREV_TX="$tx"; WS_PREV_CPU="$cu"
+  [ -z "$WS_SPEND_LINE" ] || echo "$WS_SPEND_LINE"
+}
+
+# One JSON line: ps + gpu + mem + disk + net + listeners + spend + flags.
+# $1 = probe file; run ws_vis_render >/dev/null first so $WS_TMP is populated.
+ws_vis_json() {
+  local f="$1" t="$WS_TMP"
+  ws_sec "$f" meta >"$t/meta"
+  jq -cn \
+    --arg label "${V_ID:-$V_HOST:$V_PORT}" \
+    --arg host "$(sed -n 's/^host=//p' "$t/meta" | head -1)" \
+    --arg ts "$(sed -n 's/^ts=//p' "$t/meta" | head -1)" \
+    --rawfile gpu "$t/gpu" --rawfile ps "$t/ps" --rawfile vram "$t/vram" --rawfile cg "$t/cg" \
+    --rawfile disk "$t/disk" --rawfile net "$t/net" --rawfile ls "$t/listeners.tsv" --rawfile flags "$t/flags" \
+    --argjson spend "$WS_SPEND_JSON" '
+    def n: try tonumber catch null;
+    def lines: split("\n") | map(select(length>0));
+    ($vram | lines | map(split(" ")) | map({key:.[0], value:(.[1]|n)}) | from_entries) as $vm
+    | {ts:($ts|n), label:$label, host:$host,
+       gpus: [ $gpu | lines | .[] | select((startswith("ABSENT")|not) and (startswith("ERR")|not)) | split(", ")
+         | {index:(.[0]|n), name:.[1], uuid:.[2], vram_used_mib:(.[3]|n), vram_total_mib:(.[4]|n), util_pct:(.[5]|n), temp_c:(.[6]|n), power_w:(.[7]|n), power_limit_w:(.[8]|n), sm_mhz:(.[9]|n), mem_mhz:(.[10]|n)} ],
+       gpu_available: (($gpu|lines|first // "ABSENT") | ((startswith("ABSENT")|not) and (startswith("ERR")|not))),
+       procs: [ $ps | lines | .[] | select(. != "ABSENT")
+         | capture("^(?<user>\\S+)\\s+(?<pid>[0-9]+)\\s+(?<ppid>[0-9]+)\\s+(?<et>[0-9]+)\\s+(?<cpu>[0-9.]+)\\s+(?<rss>[0-9]+)\\s+(?<cmd>.*)$")
+         | {user, pid:(.pid|n), ppid:(.ppid|n), elapsed_s:(.et|n), cpu_pct:(.cpu|n), rss_kib:(.rss|n), cmd, vram_mib:($vm[.pid])} ],
+       mem: ($cg | lines | map(select(contains("=")) | split("=") | {key:.[0], value:(.[1:]|join("="))}) | from_entries
+             | {cgroup:.v, current_bytes:(.mem_current|n), max_bytes:(.mem_max|n), cpu_max:.cpu_max, cpu_usec:(.cpu_usec|n)}),
+       disk: [ $disk | lines | .[1:][] | split(" ") | select(.[5] == "/" or .[5] == "/workspace")
+         | {mount:.[5], size_kib:(.[1]|n), used_kib:(.[2]|n), avail_kib:(.[3]|n), used_pct:(.[4]|rtrimstr("%")|n)} ],
+       net: ([ $net | lines | .[] | select(contains(":")) | gsub(":"; " ") | split(" ") | map(select(length>0)) | select(.[0] != "lo") | {rx:(.[1]|n), tx:(.[9]|n)} ] | {rx_bytes:(map(.rx)|add), tx_bytes:(map(.tx)|add)}),
+       listeners: [ $ls | lines | .[] | split("\t") | {exposure:.[0], addr:.[1], port:(.[2]|n), process:.[3]} ],
+       spend: $spend,
+       flags: ($flags | lines) }'
+}
+
+# Shared driver for `ps`, `gpu`, `top` and `watch`.
 cmd_pod_view() {
   local mode="$1"; shift
   ws_vis_parse "$@"
-  local watch="" limit=40 i=0
+  local watch="" limit=40 i=0 json=0 out="" interval="" once=0
+  [ "$mode" != top ] || limit=8
   while [ "$i" -lt "${#V_REST[@]}" ]; do
     case "${V_REST[$i]}" in
-      --watch) [ "$mode" = gpu ] || die "ps: --watch is only for gpu"; watch="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
-      --limit) [ "$mode" = ps ] || die "gpu: --limit is only for ps"; limit="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --watch) [ "$mode" = gpu ] || die "$mode: --watch is only for gpu"; watch="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --limit) { [ "$mode" = ps ] || [ "$mode" = top ]; } || die "$mode: --limit is only for ps/top"; limit="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --interval) { [ "$mode" = top ] || [ "$mode" = watch ]; } || die "$mode: --interval is only for top/watch"; interval="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --once) [ "$mode" = top ] || die "$mode: --once is only for top"; once=1; i=$((i+1)) ;;
+      --json) [ "$mode" = watch ] || die "$mode: --json is only for watch"; json=1; i=$((i+1)) ;;
+      --out) [ "$mode" = watch ] || die "$mode: --out is only for watch"; out="${V_REST[$((i+1))]:-}"; i=$((i+2)) ;;
+      --t0-balance) { [ "$mode" = top ] || [ "$mode" = watch ]; } || die "$mode: --t0-balance is only for top/watch"; WS_T0="${V_REST[$((i+1))]:-}"; [[ "$WS_T0" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--t0-balance must be a number"; i=$((i+2)) ;;
       *) die "$mode: unknown option '${V_REST[$i]}'" ;;
     esac
   done
   [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -ge 1 ] || die "--limit must be a positive integer"
+  case "$mode" in
+    top)   [ "$once" = 1 ] || watch="${interval:-10}" ;;
+    watch) [ "$json" = 1 ] || die "watch: only --json output is implemented (pass --json)"; watch="${interval:-10}" ;;
+  esac
   if [ -n "$watch" ]; then
-    [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] || die "--watch N needs an integer N >= 5 (seconds)"
+    [[ "$watch" =~ ^[0-9]+$ ]] && [ "$watch" -ge 5 ] || die "refresh interval needs an integer N >= 5 (seconds)"
   fi
-  [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]$( [ "$mode" = gpu ] && printf ' [--watch N]')"
+  [ -n "$V_ID$V_HOST$V_PROBE" ] || die "usage: water-spider $mode <pod-id> [--host H --pod-port P]"
   ws_vis_resolve
-  WS_TMP="$(mktemp -d)"; trap 'rm -rf "$WS_TMP"' EXIT
+  if [ -n "$out" ]; then ( umask 077; : >>"$out" ) || die "cannot write --out $out"; fi
+  WS_TMP="$(mktemp -d)"; WS_TMP="$(mktemp -d)"; trap 'rm -rf "$WS_TMP"' EXIT
   local tick=0 fails=0 max="${WATER_SPIDER_WATCH_MAX_TICKS:-0}"
   while :; do
     tick=$((tick+1))
     if ws_vis_fetch "$WS_TMP/probe"; then
       fails=0
-      [ -n "$watch" ] && [ -t 1 ] && printf '\033[H\033[2J'
-      ws_vis_render "$WS_TMP/probe" "$mode" "$limit"
+      if [ "$mode" = top ] || [ "$mode" = watch ]; then ws_spend_update; fi
+      if [ "$mode" = watch ]; then
+        ws_vis_render "$WS_TMP/probe" ps "$limit" >/dev/null
+        local line; line="$(ws_vis_json "$WS_TMP/probe")" || die "could not build the JSON snapshot"
+        printf '%s\n' "$line"
+        [ -z "$out" ] || printf '%s\n' "$line" >>"$out"
+      else
+        if [ -n "$watch" ] && [ -t 1 ]; then printf '\033[H\033[2J'; fi
+        ws_vis_render "$WS_TMP/probe" "$mode" "$limit"
+      fi
     else
       fails=$((fails+1))
       [ -n "$watch" ] || exit 1
@@ -1273,12 +1367,14 @@ cmd_pod_view() {
     fi
     [ -n "$watch" ] || break
     [ "$max" -eq 0 ] || [ "$tick" -lt "$max" ] || break
-    echo "(refresh every ${watch}s, Ctrl-C to stop)"
+    [ "$mode" = watch ] || echo "(refresh every ${watch}s, Ctrl-C to stop)"
     sleep "$watch"
   done
 }
 cmd_ps()  { cmd_pod_view ps "$@"; }
 cmd_gpu() { cmd_pod_view gpu "$@"; }
+cmd_top() { cmd_pod_view top "$@"; }
+cmd_watch() { cmd_pod_view watch "$@"; }
 
 # ---- dispatch ---------------------------------------------------------------
 [ $# -ge 1 ] || { usage; exit 1; }
@@ -1300,8 +1396,11 @@ case "$sub" in
   scaffold)  cmd_scaffold "$@" ;;
   ps)        cmd_ps "$@" ;;
   gpu)       cmd_gpu "$@" ;;
-  _probe-script) ws_probe_script ;;
-  _redact-prog)  ws_redact_prog ;;   # internal: the read-only remote script (tests)
+  top)       cmd_top "$@" ;;
+  logs)      cmd_logs "$@" ;;
+  watch)     cmd_watch "$@" ;;
+  _probe-script) ws_probe_script ;;   # internal: the read-only remote script (tests)
+  _redact-prog)  ws_redact_prog ;;
   -h|--help|help) usage ;;
   *) die "unknown subcommand '$sub' (see: water-spider --help)" ;;
 esac
