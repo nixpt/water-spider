@@ -7,6 +7,15 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-20
+
+- Merge pull request #14 from nixpt/agent/ann/WATERS-028-pod-top-logs-watch
+- fix: address usagi review on #14 (logs allowlist + remote realpath, tail --pid, padded df JSON, --out perms, dedicated follow connection) (WATERS-028)
+- feat: pod visibility top + logs + watch --json (WATERS-028)
+- wip: top/watch (WATERS-028)
+
+
+
 ## [0.7.0] - 2026-11-20
 
 - Merge pull request #13 from nixpt/agent/ann/WATERS-027-pod-ps-gpu
