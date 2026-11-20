@@ -7,6 +7,15 @@ appends entries mechanically on pushes to `main`.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-20
+
+- Merge pull request #18 from nixpt/agent/ann/WATERS-034-ci-shellcheck
+- Merge origin/main (#17, v0.8.2) into WATERS-034
+- WATERS-034: docs command scans only shell files
+- WATERS-034: fix CI ShellCheck (SC2015 under the pinned v0.10.0)
+
+
+
 ## [0.8.2] - 2026-11-20
 
 - Merge pull request #17 from nixpt/agent/ann/WATERS-032-033-help-redaction
